@@ -1,11 +1,12 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Bot, Sparkles, MessageSquare, Database, ArrowRight, ShieldCheck } from 'lucide-react';
-import { useUserStore } from '../stores/useFinanceStore';
+import { Bot, Sparkles, MessageSquare, Database, ArrowRight, ShieldCheck, Mail, X, ShieldAlert } from 'lucide-react';
+import { useUserStore, useAgentStore } from '../stores/useFinanceStore';
 
 export default function Onboarding() {
   const navigate = useNavigate();
-  const { setProfile } = useUserStore();
+  const { setProfile, setAutoSmsEnabled } = useUserStore();
+  const { triggerAutoSmsSimulation } = useAgentStore();
   const [step, setStep] = useState(1);
 
   // Form states
@@ -13,11 +14,35 @@ export default function Onboarding() {
   const [income, setIncome] = useState('');
   const [mode, setMode] = useState<'Conservative' | 'Balanced' | 'Aggressive'>('Balanced');
 
-  const handleSubmit = (e: React.FormEvent) => {
+  // Permission prompt state
+  const [showPermissionPrompt, setShowPermissionPrompt] = useState(false);
+
+  const handleProfileSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!name || !income) return;
 
+    // Proceed to Step 4 (Data Sync Preferences) instead of routing directly
+    setStep(4);
+  };
+
+  const handleManualSync = () => {
+    setAutoSmsEnabled(false);
     setProfile(name, parseFloat(income), mode);
+    navigate('/');
+  };
+
+  const handleAutoSmsClick = () => {
+    setShowPermissionPrompt(true);
+  };
+
+  const handleGrantPermission = () => {
+    setShowPermissionPrompt(false);
+    setAutoSmsEnabled(true);
+    setProfile(name, parseFloat(income), mode);
+    
+    // Trigger the 30-second Zomato UPI transaction simulation
+    triggerAutoSmsSimulation();
+    
     navigate('/');
   };
 
@@ -134,7 +159,7 @@ export default function Onboarding() {
             Set up your profile
           </h2>
 
-          <form onSubmit={handleSubmit} className="space-y-4">
+          <form onSubmit={handleProfileSubmit} className="space-y-4">
             
             {/* Name Input */}
             <div className="space-y-1">
@@ -192,7 +217,7 @@ export default function Onboarding() {
             <div className="bg-slate-900 border border-white/5 rounded-xl p-3 flex items-start gap-2">
               <ShieldCheck className="text-indigo-400 shrink-0 mt-0.5" size={14} />
               <p className="text-[9px] text-slate-500 leading-normal">
-                FinAgent is privacy-first. Financial data is kept completely locally in state and isolated from other admin platform records.
+                FinAgent is privacy-first. Financial data is kept locally in state and isolated from admin platform records.
               </p>
             </div>
 
@@ -202,11 +227,108 @@ export default function Onboarding() {
                 type="submit"
                 className="w-full py-3.5 bg-indigo-gradient hover:from-indigo-600 hover:to-violet-700 text-white rounded-full font-bold text-sm shadow-indigo-glow transition-all flex items-center justify-center gap-2"
               >
-                <span>Start Managing</span>
+                <span>Continue</span>
                 <ArrowRight size={14} />
               </button>
             </div>
           </form>
+        </div>
+      )}
+
+      {/* Screen 4: Data Sync Preferences */}
+      {step === 4 && (
+        <div className="space-y-6 max-w-sm animate-fade-in w-full text-left relative">
+          <h2 className="text-2xl font-extrabold text-white tracking-tight text-center leading-tight mb-2">
+            Data Sync Preferences
+          </h2>
+          <p className="text-xs text-slate-400 text-center mb-6">
+            How would you like to track expenses?
+          </p>
+
+          <div className="space-y-4">
+            
+            {/* Auto SMS Button Option */}
+            <button
+              type="button"
+              onClick={handleAutoSmsClick}
+              className="w-full text-left p-4 rounded-2xl bg-indigo-600/10 border border-indigo-500/30 hover:border-indigo-500/60 transition-all flex items-start gap-3.5 relative group shadow-md"
+            >
+              <div className="w-8 h-8 rounded-full bg-indigo-500/20 border border-indigo-500/30 flex items-center justify-center shrink-0 text-indigo-400 mt-1">
+                <Bot size={16} className="group-hover:scale-110 transition-transform" />
+              </div>
+              <div className="flex-1 min-w-0 pr-12">
+                <p className="text-xs font-bold text-white flex items-center gap-1.5 leading-none">
+                  <span>🤖 Auto-detect from SMS</span>
+                  <span className="text-[8px] bg-indigo-500/20 text-indigo-400 px-1.5 py-0.5 rounded-full uppercase font-bold tracking-wider">Recommended</span>
+                </p>
+                <p className="text-[10px] text-slate-400 leading-normal mt-1.5">
+                  Agent reads your incoming transaction SMS and logs them automatically. No manual entry needed.
+                </p>
+              </div>
+            </button>
+
+            {/* Manual Button Option */}
+            <button
+              type="button"
+              onClick={handleManualSync}
+              className="w-full text-left p-4 rounded-2xl bg-slate-900 border border-white/5 hover:border-white/10 transition-all flex items-start gap-3.5 group hover:bg-slate-900/80"
+            >
+              <div className="w-8 h-8 rounded-full bg-slate-800 border border-white/5 flex items-center justify-center shrink-0 text-slate-400 mt-1">
+                <X size={14} />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-xs font-bold text-white leading-none">
+                  <span>✏️ I'll enter manually</span>
+                </p>
+                <p className="text-[10px] text-slate-400 leading-normal mt-1.5">
+                  Enter your own transactions. Agent will still automatically categorize and analyze them for budgets.
+                </p>
+              </div>
+            </button>
+          </div>
+
+          {/* SMS explanation badge */}
+          <div className="bg-slate-900/50 border border-white/5 rounded-xl p-3 flex items-start gap-2.5 mt-8">
+            <Mail className="text-indigo-400 shrink-0 mt-0.5" size={14} />
+            <p className="text-[9px] text-slate-500 leading-relaxed">
+              <strong>SMS Parsing</strong>: Tapping Auto SMS reads incoming transaction alerts (e.g. UPI debit notifications) and extracts amounts, merchants, and categories automatically. Secure, local, and requires zero manual effort.
+            </p>
+          </div>
+
+          {/* SIMULATED SYSTEM PERMISSION SHEET MODAL */}
+          {showPermissionPrompt && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4 animate-fade-in">
+              <div className="w-full max-w-xs bg-slate-900 border border-white/10 rounded-2xl p-5 shadow-2xl space-y-4 text-center">
+                <div className="w-10 h-10 rounded-full bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 flex items-center justify-center mx-auto">
+                  <ShieldAlert size={20} />
+                </div>
+                
+                <div className="space-y-1.5">
+                  <h4 className="text-xs font-bold text-white">Allow FinAgent SMS Permission?</h4>
+                  <p className="text-[10px] text-slate-400 leading-relaxed">
+                    FinAgent requires permission to read incoming text messages to parse transactional debits in real-time.
+                  </p>
+                </div>
+
+                <div className="flex gap-2.5 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowPermissionPrompt(false)}
+                    className="flex-1 py-2 border border-white/5 hover:border-white/10 bg-slate-950 text-slate-400 hover:text-white rounded-full text-[10px] font-bold"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleGrantPermission}
+                    className="flex-1 py-2 bg-indigo-gradient hover:from-indigo-600 hover:to-violet-700 text-white rounded-full text-[10px] font-bold"
+                  >
+                    Auto SMS
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>

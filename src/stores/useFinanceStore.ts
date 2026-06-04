@@ -11,7 +11,9 @@ export interface UserState {
   nextLevel: string;
   xpToNext: number;
   badges: string[];
+  autoSmsEnabled: boolean;
   setProfile: (name: string, income: number, mode: 'Conservative' | 'Balanced' | 'Aggressive') => void;
+  setAutoSmsEnabled: (enabled: boolean) => void;
   addXp: (amount: number) => void;
 }
 
@@ -78,9 +80,12 @@ export interface AgentState {
   chatHistory: ChatMessage[];
   isThinking: boolean;
   activityLog: AgentActivityItem[];
+  currentNotification: { title: string; message: string; subMessage: string; op: string } | null;
   addChatMessage: (msg: ChatMessage) => void;
   setThinking: (thinking: boolean) => void;
   addActivityLog: (item: Omit<AgentActivityItem, 'id' | 'timestamp'>) => void;
+  setCurrentNotification: (notif: { title: string; message: string; subMessage: string; op: string } | null) => void;
+  triggerAutoSmsSimulation: () => void;
 }
 
 export interface InsightsState {
@@ -203,7 +208,9 @@ export const useUserStore = create<UserState>((set) => ({
   nextLevel: 'Financial Genius',
   xpToNext: 500,
   badges: ['First Goal Saved', '7-Day Streak', 'Budget Master'],
+  autoSmsEnabled: false,
   setProfile: (name, income, mode) => set({ name, monthlyIncome: income, savingsMode: mode }),
+  setAutoSmsEnabled: (enabled) => set({ autoSmsEnabled: enabled }),
   addXp: (amount) => set((state) => {
     const newXp = state.xp + amount;
     if (newXp >= state.xpToNext) {
@@ -270,6 +277,7 @@ export const useAgentStore = create<AgentState>((set) => ({
   chatHistory: initialChatHistory,
   isThinking: false,
   activityLog: initialActivityLog,
+  currentNotification: null,
   addChatMessage: (msg) => set((state) => ({ chatHistory: [...state.chatHistory, msg] })),
   setThinking: (thinking) => set({ isThinking: thinking }),
   addActivityLog: (item) => set((state) => {
@@ -279,7 +287,42 @@ export const useAgentStore = create<AgentState>((set) => ({
       timestamp: 'Just now'
     };
     return { activityLog: [newItem, ...state.activityLog] };
-  })
+  }),
+  setCurrentNotification: (notif) => set({ currentNotification: notif }),
+  triggerAutoSmsSimulation: () => {
+    // 30 seconds delay simulation
+    setTimeout(() => {
+      // 1. Add UPI transaction of ₹340
+      useTransactionsStore.getState().addTransaction({
+        type: 'expense',
+        category: 'Food',
+        amount: 340,
+        description: 'Zomato debited via UPI'
+      });
+      
+      // 2. Recalculate insights
+      const currentTxs = useTransactionsStore.getState().transactions;
+      useInsightsStore.getState().recalculateInsights(currentTxs);
+
+      // 3. Add Activity log
+      useAgentStore.getState().addActivityLog({
+        category: 'EXPENSE',
+        description: 'Auto SMS: Detected ₹340 debited via UPI (Zomato). Categorized as Food.',
+        mongoOperation: 'db.transactions.insertOne({ amount: 340, category: "Food", merchant: "Zomato", paymentMethod: "UPI" })'
+      });
+
+      // 4. Award XP
+      useUserStore.getState().addXp(20);
+
+      // 5. Trigger notification popup in layout
+      useAgentStore.getState().setCurrentNotification({
+        title: 'Transaction Detected',
+        message: '🔔 Transaction detected: ₹340 debited via UPI (Zomato)',
+        subMessage: "I've categorized this as Food and updated your budget. You have ₹660 left in Food this week.",
+        op: '→ MongoDB Atlas MCP: db.transactions.insertOne()'
+      });
+    }, 30000); // 30 seconds
+  }
 }));
 
 export const useInsightsStore = create<InsightsState>((set) => ({
