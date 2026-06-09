@@ -1,5 +1,5 @@
 import { HashRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import Home from './pages/Home';
 import AgentChat from './pages/AgentChat';
 import Insights from './pages/Insights';
@@ -8,11 +8,24 @@ import Community from './pages/Community';
 import Onboarding from './pages/Onboarding';
 import Admin from './pages/Admin';
 import BottomNav from './components/BottomNav';
-import { useAgentStore } from './stores/useFinanceStore';
-import { X, Database, Bot } from 'lucide-react';
+import { useAgentStore, useUserStore, loadUserData } from './stores/useFinanceStore';
+import { X, Database, Bot, User } from 'lucide-react';
 
 export default function App() {
   const { currentNotification, setCurrentNotification } = useAgentStore();
+  const { currentUserId } = useUserStore();
+  const [usersList, setUsersList] = useState<any[]>([]);
+
+  useEffect(() => {
+    // 1. Initial boot data sync
+    loadUserData('usr_1');
+
+    // 2. Fetch list of synthetic users for selector context
+    fetch('/api/users')
+      .then(res => res.json())
+      .then(data => setUsersList(data))
+      .catch(err => console.error('Error fetching user list:', err));
+  }, []);
 
   useEffect(() => {
     if (currentNotification) {
@@ -27,7 +40,34 @@ export default function App() {
     <Router>
       <div className="min-h-screen bg-background text-textPrimary flex flex-col font-sans select-none overflow-x-hidden antialiased relative">
         
-        {/* Floating Auto SMS Notification Banner */}
+        {/* Global User Selector Header */}
+        <div className="w-full max-w-lg mx-auto px-4 pt-3 flex justify-between items-center z-40 relative">
+          <div className="flex items-center gap-2 bg-slate-900/80 border border-white/5 p-1.5 px-3.5 rounded-full backdrop-blur-md shadow-lg w-full justify-between">
+            <div className="flex items-center gap-2">
+              <div className="w-6 h-6 rounded-full bg-indigo-500/20 border border-indigo-500/30 flex items-center justify-center text-indigo-400">
+                <User size={12} />
+              </div>
+              <span className="text-[10px] text-slate-400 uppercase font-bold tracking-wider">Account context</span>
+            </div>
+            
+            <select
+              value={currentUserId}
+              onChange={(e) => loadUserData(e.target.value)}
+              className="bg-transparent text-xs font-bold text-white border-none focus:ring-0 focus:outline-none cursor-pointer pr-2 hover:text-indigo-400 transition-colors"
+            >
+              {usersList.length === 0 ? (
+                <option value="usr_1" className="bg-slate-950">Arjun</option>
+              ) : (
+                usersList.map(u => (
+                  <option key={u._id} value={u._id} className="bg-slate-950 text-white font-medium">
+                    {u.name} (₹{u.monthlyIncome.toLocaleString()})
+                  </option>
+                ))
+              )}
+            </select>
+          </div>
+        </div>
+
         {currentNotification && (
           <div className="fixed top-4 left-1/2 -translate-x-1/2 w-full max-w-sm px-4 z-50 animate-fade-in">
             <div className="bg-slate-900/95 backdrop-blur-md border border-indigo-500/30 rounded-2xl p-4 shadow-2xl relative shadow-indigo-glow/20 flex gap-3">

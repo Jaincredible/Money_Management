@@ -3,7 +3,7 @@ import { Bot, Trophy, Flame, Target, Star, Users, Plus, X, Award, ArrowRight } f
 import { useUserStore, useAgentStore } from '../stores/useFinanceStore';
 
 export default function Community() {
-  const { xp, level, nextLevel, xpToNext, addXp } = useUserStore();
+  const { name, xp, level, nextLevel, xpToNext, addXp } = useUserStore();
   const { addActivityLog } = useAgentStore();
 
   const [isInviteOpen, setIsInviteOpen] = useState(false);
@@ -22,11 +22,11 @@ export default function Community() {
   const [createStep, setCreateStep] = useState(0);
 
   const leaderboard = [
-    { rank: '🥇', name: 'You (Arjun)', saved: 2500, pct: 78, isUser: true, initials: 'AJ', color: 'bg-indigo-600' },
-    { rank: '🥈', name: 'Priya', saved: 2100, pct: 65, isUser: false, initials: 'PR', color: 'bg-emerald-600' },
-    { rank: '🥉', name: 'Rahul', saved: 1800, pct: 56, isUser: false, initials: 'RH', color: 'bg-emerald-600' },
-    { rank: '4', name: 'Aisha', saved: 1200, pct: 37, isUser: false, initials: 'AS', color: 'bg-amber-600' },
-    { rank: '5', name: 'Dev', saved: 900, pct: 28, isUser: false, initials: 'DV', color: 'bg-amber-600' },
+    { rank: '🥇', name: `You (${name})`, saved: 2500, pct: 78, isUser: true, initials: name.substring(0, 2).toUpperCase(), color: 'bg-indigo-600' },
+    { rank: '🥈', name: name === 'Priya' ? 'Arjun' : 'Priya', saved: 2100, pct: 65, isUser: false, initials: name === 'Priya' ? 'AJ' : 'PR', color: 'bg-emerald-600' },
+    { rank: '🥉', name: name === 'Rahul' ? 'Arjun' : 'Rahul', saved: 1800, pct: 56, isUser: false, initials: name === 'Rahul' ? 'AJ' : 'RH', color: 'bg-emerald-600' },
+    { rank: '4', name: name === 'Aisha' ? 'Arjun' : 'Aisha', saved: 1200, pct: 37, isUser: false, initials: name === 'Aisha' ? 'AJ' : 'AS', color: 'bg-amber-600' },
+    { rank: '5', name: name === 'Dev' ? 'Arjun' : 'Dev', saved: 900, pct: 28, isUser: false, initials: name === 'Dev' ? 'AJ' : 'DV', color: 'bg-amber-600' },
   ];
 
   const handleCreateChallenge = (e: React.FormEvent) => {
