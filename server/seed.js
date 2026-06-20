@@ -363,7 +363,11 @@ export async function seedDatabase() {
 }
 
 // If run directly
-if (import.meta.url === `file://${process.argv[1]}`.replace(/\\/g, '/')) {
+const isDirectRun = process.argv[1] && (
+  process.argv[1].endsWith('seed.js') || 
+  import.meta.url.includes(process.argv[1].replace(/\\/g, '/').replace(/ /g, '%20'))
+);
+if (isDirectRun) {
   (async () => {
     try {
       await seedDatabase();
@@ -374,3 +378,4 @@ if (import.meta.url === `file://${process.argv[1]}`.replace(/\\/g, '/')) {
     }
   })();
 }
+
