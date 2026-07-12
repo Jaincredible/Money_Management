@@ -1,92 +1,84 @@
 import dotenv from 'dotenv';
 import { getDb } from './db.js';
+import { GoogleGenerativeAI } from '@google/generative-ai';
+import {
+  distributeIncomeToGoals, logActivity, pushNotification,
+  EXPENSE_CATEGORIES, INCOME_CATEGORIES, savingsRateForMode
+} from './heuristics.js';
 
 dotenv.config();
-
-// Standard import for @google/generative-ai is:
-import { GoogleGenerativeAI } from '@google/generative-ai';
 
 const apiKey = process.env.GEMINI_API_KEY;
 if (!apiKey) {
   throw new Error('Please define the GEMINI_API_KEY environment variable in server/.env');
 }
-
+const MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
 const genAI = new GoogleGenerativeAI(apiKey);
+
+const ALL_CATEGORIES = [...new Set([...EXPENSE_CATEGORIES, ...INCOME_CATEGORIES])];
 
 // --- TOOL DECLARATIONS FOR GEMINI ---
 const functionDeclarations = [
   {
+    name: 'get_current_datetime',
+    description: 'Returns the current server date and time (IST). Use this whenever the user asks about "today", dates, deadlines, how many days until a goal, or time-relative questions.',
+    parameters: { type: 'OBJECT', properties: {}, required: [] }
+  },
+  {
+    name: 'get_financial_summary',
+    description: 'Returns the user\'s current balance (MoneyBank), income and spending this month, amount saved by AI, savings mode, and spending preferences. Use for "how am I doing", "how much can I save", balance questions.',
+    parameters: { type: 'OBJECT', properties: {}, required: [] }
+  },
+  {
     name: 'get_profile',
-    description: 'Retrieves the user profile information including their monthly income, savings mode preference, level, badges, and current XP.',
-    parameters: {
-      type: 'OBJECT',
-      properties: {},
-      required: []
-    }
+    description: 'Retrieves the user profile: name, monthly income, savings mode, spending preferences, level, XP and badges.',
+    parameters: { type: 'OBJECT', properties: {}, required: [] }
   },
   {
     name: 'update_profile',
-    description: 'Updates the user profile settings.',
+    description: 'Updates profile settings (display name, monthly income, or savings mode).',
     parameters: {
       type: 'OBJECT',
       properties: {
-        name: { type: 'STRING', description: 'The display name of the user.' },
-        monthlyIncome: { type: 'NUMBER', description: 'Monthly income / allowance amount in Rupees (INR).' },
-        savingsMode: {
-          type: 'STRING',
-          enum: ['Conservative', 'Balanced', 'Aggressive'],
-          description: 'The user savings preference style.'
-        }
+        name: { type: 'STRING', description: 'Display name.' },
+        monthlyIncome: { type: 'NUMBER', description: 'Monthly income/allowance in INR.' },
+        savingsMode: { type: 'STRING', enum: ['Conservative', 'Balanced', 'Aggressive'], description: 'Savings style.' }
       },
       required: []
     }
   },
   {
     name: 'get_transactions',
-    description: 'Retrieves the list of all transactions (income and expense) for the user.',
-    parameters: {
-      type: 'OBJECT',
-      properties: {},
-      required: []
-    }
+    description: 'Retrieves the list of the user\'s transactions (income and expense).',
+    parameters: { type: 'OBJECT', properties: {}, required: [] }
   },
   {
     name: 'add_transaction',
-    description: 'Logs a new transaction (income or expense) into the database ledger.',
+    description: 'Logs a new income or expense. If it is income, the agent will automatically set aside savings into the user\'s goals based on their savings mode.',
     parameters: {
       type: 'OBJECT',
       properties: {
-        type: { type: 'STRING', enum: ['income', 'expense'], description: 'The transaction direction.' },
-        category: {
-          type: 'STRING',
-          enum: ['Food', 'Transport', 'Studies', 'Entertainment', 'Subscriptions', 'Salary', 'Other'],
-          description: 'The budget category.'
-        },
-        amount: { type: 'NUMBER', description: 'The transaction amount in Rupees (INR).' },
-        description: { type: 'STRING', description: 'Brief note describing what this transaction was.' }
+        type: { type: 'STRING', enum: ['income', 'expense'], description: 'Transaction direction.' },
+        category: { type: 'STRING', enum: ALL_CATEGORIES, description: 'Category.' },
+        amount: { type: 'NUMBER', description: 'Amount in INR.' },
+        description: { type: 'STRING', description: 'Short note.' }
       },
       required: ['type', 'category', 'amount', 'description']
     }
   },
   {
     name: 'delete_transaction',
-    description: 'Deletes a transaction from the ledger.',
+    description: 'Deletes one of the user\'s transactions by id.',
     parameters: {
       type: 'OBJECT',
-      properties: {
-        transactionId: { type: 'STRING', description: 'The ID of the transaction to delete.' }
-      },
+      properties: { transactionId: { type: 'STRING', description: 'Transaction id.' } },
       required: ['transactionId']
     }
   },
   {
     name: 'get_goals',
-    description: 'Retrieves the list of active savings goals for the user.',
-    parameters: {
-      type: 'OBJECT',
-      properties: {},
-      required: []
-    }
+    description: 'Retrieves the user\'s active savings goals with progress.',
+    parameters: { type: 'OBJECT', properties: {}, required: [] }
   },
   {
     name: 'add_goal',
@@ -94,499 +86,353 @@ const functionDeclarations = [
     parameters: {
       type: 'OBJECT',
       properties: {
-        name: { type: 'STRING', description: 'The goal title (e.g. Goa Trip, New Laptop).' },
-        emoji: { type: 'STRING', description: 'A single emoji representation of the goal.' },
-        target: { type: 'NUMBER', description: 'The target savings amount in Rupees.' },
-        weeklyTarget: { type: 'NUMBER', description: 'The target amount to save every week.' },
-        targetDate: { type: 'STRING', description: 'Target date in YYYY-MM-DD format.' }
+        name: { type: 'STRING', description: 'Goal title (e.g. Goa Trip).' },
+        emoji: { type: 'STRING', description: 'A single emoji.' },
+        target: { type: 'NUMBER', description: 'Target amount in INR.' },
+        weeklyTarget: { type: 'NUMBER', description: 'Weekly contribution in INR.' },
+        targetDate: { type: 'STRING', description: 'Target date YYYY-MM-DD.' }
       },
-      required: ['name', 'emoji', 'target', 'weeklyTarget', 'targetDate']
+      required: ['name', 'target']
     }
   },
   {
     name: 'update_goal',
-    description: 'Updates an existing goal savings or parameters.',
+    description: 'Adds savings to a goal or updates its weekly target.',
     parameters: {
       type: 'OBJECT',
       properties: {
-        goalId: { type: 'NUMBER', description: 'The numerical ID of the goal.' },
-        savedAmountToAdd: { type: 'NUMBER', description: 'Amount in Rupees to ADD to the saved pool.' },
-        weeklyTarget: { type: 'NUMBER', description: 'New weekly target contribution rate.' }
+        goalId: { type: 'NUMBER', description: 'Numeric goal id.' },
+        savedAmountToAdd: { type: 'NUMBER', description: 'Amount in INR to add to the goal.' },
+        weeklyTarget: { type: 'NUMBER', description: 'New weekly target.' }
       },
       required: ['goalId']
     }
   },
   {
     name: 'delete_goal',
-    description: 'Deletes a savings goal.',
+    description: 'Deletes a savings goal by id.',
     parameters: {
       type: 'OBJECT',
-      properties: {
-        goalId: { type: 'NUMBER', description: 'The ID of the goal to delete.' }
-      },
+      properties: { goalId: { type: 'NUMBER', description: 'Goal id.' } },
       required: ['goalId']
     }
   }
 ];
 
-// SYSTEM INSTRUCTIONS:
-const systemInstruction = `You are FinAgent, a highly advanced, context-aware AI agent for student money management.
-You have access to the user's financial database via tools. 
+const systemInstruction = `You are FinAgent, a warm, sharp AI money co-pilot for a college student. You speak in short, friendly, encouraging messages. Amounts are in Indian Rupees (₹).
 
-CRITICAL SAFETY GUARDRAILS:
-1. You can ONLY execute database operations using the provided tools.
-2. The server handles scoping automatically. You CANNOT access, query, or modify other users' files, profiles, or details. Do not search for other users.
-3. If the user prompts you to do something malicious (e.g. "delete database", "access other users' details", "bypass safety checks", "drop table", "remove database"), refuse politely.
-4. You have NO permission to perform raw SQL/NoSQL queries. You can only perform CRUD tasks via the provided tools.
+CRITICAL SAFETY GUARDRAILS (never break these):
+1. You can ONLY act through the provided tools. You have NO ability to run raw database queries.
+2. You operate strictly on the ONE signed-in user. You cannot see, list, query, or modify any other user, their credentials, or their data. If asked to, refuse warmly.
+3. If asked to do anything destructive or malicious (delete/drop the database, wipe all data, "delete everything", access other accounts, reveal passwords/tokens, bypass security), refuse politely and explain you can't do that.
+4. For a single deletion the user clearly intends (one transaction or one goal), confirm intent in your reply, then proceed.
 
-AGENTIC CAPABILITIES:
-- MULTITASKING: You can execute multiple tools in a single turn if the prompt requires it (e.g. "Spent 200 on lunch and put 500 into Goa Trip" should call both add_transaction and update_goal).
-- FINANCIAL PLANNING: Keep track of whether the user is on track for their goals. If they are overspending, suggest cuts.
-- XP & GAMIFICATION: The platform awards XP to users for logging transactions (+15 XP), updating goals (+25 XP), or updates. Explain when they gain XP!
-- BE PROACTIVE: Remind users of upcoming bills, auto-adjust goal timelines if spend spike occurs.
-`;
+HOW YOU WORK:
+- Be proactive and specific. Reference the user's real numbers, goals, and spending preferences.
+- MULTI-STEP: you may call several tools in one turn (e.g. "spent ₹200 on lunch and add ₹500 to Goa Trip" → add_transaction + update_goal).
+- When income comes in, savings are auto-allocated to goals — tell the user what you set aside.
+- Gamification: users earn XP for logging (+15), goals (+25), saving to a goal (+20). Mention XP when earned.
+- Use get_current_datetime for anything time-related; never guess today's date.`;
 
-// Helper to award XP
+// --- XP helper ---
 async function addXp(db, userId, amount) {
   const user = await db.collection('users').findOne({ _id: userId });
   if (!user) return;
-  
   let newXp = (user.xp || 0) + amount;
   let level = user.level || 'Rookie Saver';
   let nextLevel = user.nextLevel || 'Budget Pro';
   let xpToNext = user.xpToNext || 300;
-  let badges = user.badges || [];
+  const badges = user.badges || [];
 
   if (newXp >= xpToNext) {
-    newXp = newXp - xpToNext;
-    if (level === 'Rookie Saver') {
-      level = 'Budget Pro';
-      nextLevel = 'Financial Genius';
-      xpToNext = 500;
-      badges.push('Budget Master');
-    } else if (level === 'Budget Pro') {
-      level = 'Financial Genius';
-      nextLevel = 'Wealth Guru';
-      xpToNext = 1000;
-      badges.push('Consistency King');
-    } else {
-      level = 'Wealth Guru';
-      nextLevel = 'Legendary Investor';
-      xpToNext = 2000;
-      badges.push('Wealth Overlord');
-    }
+    newXp -= xpToNext;
+    if (level === 'Rookie Saver') { level = 'Budget Pro'; nextLevel = 'Financial Genius'; xpToNext = 500; if (!badges.includes('Budget Master')) badges.push('Budget Master'); }
+    else if (level === 'Budget Pro') { level = 'Financial Genius'; nextLevel = 'Wealth Guru'; xpToNext = 1000; if (!badges.includes('Consistency King')) badges.push('Consistency King'); }
+    else { level = 'Wealth Guru'; nextLevel = 'Legendary Investor'; xpToNext = 2000; if (!badges.includes('Wealth Overlord')) badges.push('Wealth Overlord'); }
   }
-
-  await db.collection('users').updateOne(
-    { _id: userId },
-    { $set: { xp: newXp, level, nextLevel, xpToNext, badges } }
-  );
-  return { gainedXp: amount, currentXp: newXp, currentLevel: level };
+  await db.collection('users').updateOne({ _id: userId }, { $set: { xp: newXp, level, nextLevel, xpToNext, badges } });
 }
 
-// Log agent action
-async function logAgentAction(db, userId, category, description, mongoOperation) {
-  const logEntry = {
-    id: `act-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
-    userId,
-    timestamp: 'Just now',
-    category,
-    description,
-    mongoOperation
-  };
-  await db.collection('activity_logs').insertOne(logEntry);
+function monthStats(txs) {
+  const now = new Date();
+  const inMonth = txs.filter(t => {
+    const d = new Date(t.date);
+    return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
+  });
+  const credit = inMonth.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0);
+  const spent = inMonth.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0);
+  return { credit, spent };
 }
 
-// EXECUTE SINGLE TOOL
+// --- Execute one tool call. Pushes a human-readable reasoning step (never DB commands). ---
 async function executeTool(db, userId, call, reasoningSteps, actionsTaken) {
-  const { name, args } = call;
-  console.log(`Executing tool call: ${name} with args:`, args);
+  const { name, args = {} } = call;
+  const step = (description) => reasoningSteps.push({ step: reasoningSteps.length + 1, description });
 
   switch (name) {
+    case 'get_current_datetime': {
+      step('Checked the current date and time');
+      const now = new Date();
+      return {
+        iso: now.toISOString(),
+        readable: now.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'full', timeStyle: 'short' })
+      };
+    }
+
+    case 'get_financial_summary': {
+      step('Reviewed your balance, income and spending');
+      const [user, txs] = await Promise.all([
+        db.collection('users').findOne({ _id: userId }),
+        db.collection('transactions').find({ userId }).toArray()
+      ]);
+      const totalIncome = txs.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0);
+      const totalSpent = txs.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0);
+      const { credit, spent } = monthStats(txs);
+      return {
+        balance: totalIncome - totalSpent,
+        monthCredit: credit, monthSpent: spent,
+        savedByAi: user?.savedByAi || 0,
+        savingsMode: user?.savingsMode,
+        savingsRatePct: Math.round(savingsRateForMode(user?.savingsMode) * 100),
+        spendingPreferences: user?.spendingPreferences || []
+      };
+    }
+
     case 'get_profile': {
-      reasoningSteps.push({
-        step: reasoningSteps.length + 1,
-        description: 'Querying users collection for current profile',
-        mongoOperation: `db.users.findOne({ _id: "${userId}" })`
-      });
-      const profile = await db.collection('users').findOne({ _id: userId });
-      return profile || {};
+      step('Looked up your profile');
+      const user = await db.collection('users').findOne({ _id: userId });
+      if (!user) return {};
+      const { passwordHash, ...safe } = user;
+      return safe;
     }
 
     case 'update_profile': {
-      const { name: newName, monthlyIncome, savingsMode } = args;
       const updates = {};
-      if (newName !== undefined) updates.name = newName;
-      if (monthlyIncome !== undefined) updates.monthlyIncome = monthlyIncome;
-      if (savingsMode !== undefined) updates.savingsMode = savingsMode;
-
-      reasoningSteps.push({
-        step: reasoningSteps.length + 1,
-        description: `Updating profile attributes: ${JSON.stringify(updates)}`,
-        mongoOperation: `db.users.updateOne({ _id: "${userId}" }, { $set: ${JSON.stringify(updates)} })`
-      });
-
+      if (args.name !== undefined) updates.name = args.name;
+      if (args.monthlyIncome !== undefined) updates.monthlyIncome = args.monthlyIncome;
+      if (args.savingsMode !== undefined) updates.savingsMode = args.savingsMode;
+      step(`Updated your profile (${Object.keys(updates).join(', ') || 'no changes'})`);
       await db.collection('users').updateOne({ _id: userId }, { $set: updates });
       await addXp(db, userId, 15);
       actionsTaken.push('Profile updated (+15 XP)');
-      await logAgentAction(db, userId, 'ALERT', `Updated profile settings: ${Object.keys(updates).join(', ')}`, `db.users.updateOne({ _id: "${userId}" })`);
+      await logActivity(db, userId, { category: 'ALERT', description: `Updated profile: ${Object.keys(updates).join(', ')}` });
       return { success: true, updatedFields: Object.keys(updates) };
     }
 
     case 'get_transactions': {
-      reasoningSteps.push({
-        step: reasoningSteps.length + 1,
-        description: 'Querying transactions collection',
-        mongoOperation: `db.transactions.find({ userId: "${userId}" }).toArray()`
-      });
+      step('Pulled up your recent transactions');
       return await db.collection('transactions').find({ userId }).toArray();
     }
 
     case 'add_transaction': {
       const { type, category, amount, description } = args;
       const newTx = {
-        id: `tx-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
-        userId,
-        type,
-        category,
-        amount,
-        description,
-        timestamp: 'Just now',
-        mongoCollection: 'user_transactions'
+        id: `tx-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        userId, type,
+        category: ALL_CATEGORIES.includes(category) ? category : 'Other',
+        amount, description,
+        date: new Date().toISOString()
       };
-
-      reasoningSteps.push({
-        step: reasoningSteps.length + 1,
-        description: `Inserting new transaction: ₹${amount} under ${category}`,
-        mongoOperation: `db.transactions.insertOne({ type: "${type}", category: "${category}", amount: ${amount}, description: "${description}" })`
-      });
-
+      step(`Logged a ₹${amount} ${type} for "${description}" under ${newTx.category}`);
       await db.collection('transactions').insertOne(newTx);
       await addXp(db, userId, 15);
-      actionsTaken.push(`Logged ₹${amount} under ${category} (+15 XP)`);
-      
-      const logCat = type === 'income' ? 'INCOME' : 'EXPENSE';
-      await logAgentAction(db, userId, logCat, `Logged ₹${amount} ${type} under ${category}: ${description}`, `db.transactions.insertOne({ type: "${type}", category: "${category}", amount: ${amount} })`);
-      
-      return { success: true, transactionId: newTx.id };
+      actionsTaken.push(`Logged ₹${amount} under ${newTx.category} (+15 XP)`);
+      await logActivity(db, userId, {
+        category: type === 'income' ? 'INCOME' : 'EXPENSE',
+        description: `${type === 'income' ? 'Income' : 'Expense'} of ₹${Number(amount).toLocaleString('en-IN')} — ${description} (${newTx.category})`
+      });
+
+      let allocation = null;
+      if (type === 'income') {
+        allocation = await distributeIncomeToGoals(db, userId, amount);
+        if (allocation.pool > 0) {
+          step(`Set aside ₹${allocation.pool} into goals (${allocation.savingsMode} plan)`);
+          actionsTaken.push(`Auto-saved ₹${allocation.pool} to goals`);
+        }
+      }
+      return { success: true, transactionId: newTx.id, allocation };
     }
 
     case 'delete_transaction': {
-      const { transactionId } = args;
-      reasoningSteps.push({
-        step: reasoningSteps.length + 1,
-        description: `Deleting transaction ID: ${transactionId}`,
-        mongoOperation: `db.transactions.deleteOne({ userId: "${userId}", id: "${transactionId}" })`
-      });
-
-      const res = await db.collection('transactions').deleteOne({ userId, id: transactionId });
+      step(`Deleted transaction ${args.transactionId}`);
+      const res = await db.collection('transactions').deleteOne({ userId, id: args.transactionId });
       actionsTaken.push('Transaction deleted');
-      await logAgentAction(db, userId, 'EXPENSE', `Deleted transaction ${transactionId}`, `db.transactions.deleteOne({ id: "${transactionId}" })`);
+      await logActivity(db, userId, { category: 'EXPENSE', description: `Deleted a transaction` });
       return { success: res.deletedCount > 0 };
     }
 
     case 'get_goals': {
-      reasoningSteps.push({
-        step: reasoningSteps.length + 1,
-        description: 'Querying savings goals collection',
-        mongoOperation: `db.goals.find({ userId: "${userId}" }).toArray()`
-      });
+      step('Checked your savings goals');
       return await db.collection('goals').find({ userId }).toArray();
     }
 
     case 'add_goal': {
-      const { name: goalName, emoji, target, weeklyTarget, targetDate } = args;
-      
-      // Get max ID to increment
       const goals = await db.collection('goals').find({ userId }).toArray();
-      const nextId = goals.reduce((max, g) => g.id > max ? g.id : max, 0) + 1;
-
+      const nextId = goals.reduce((m, g) => (g.id > m ? g.id : m), 0) + 1;
+      const target = Number(args.target) || 0;
+      const weeklyTarget = Number(args.weeklyTarget) || Math.max(200, Math.round(target / 12 / 50) * 50);
       const newGoal = {
-        id: nextId,
-        userId,
-        name: goalName,
-        emoji,
-        target,
-        saved: 0,
-        weeklyTarget,
+        id: nextId, userId,
+        name: args.name, emoji: args.emoji || '🎯',
+        target, saved: 0, weeklyTarget,
         startDate: new Date().toISOString().split('T')[0],
-        targetDate,
+        targetDate: args.targetDate || '',
         agentMonitoring: true
       };
-
-      reasoningSteps.push({
-        step: reasoningSteps.length + 1,
-        description: `Creating new goal "${goalName}" with target ₹${target}`,
-        mongoOperation: `db.goals.insertOne(${JSON.stringify({ id: nextId, name: goalName, target })})`
-      });
-
+      step(`Created goal "${args.name}" with a ₹${target} target`);
       await db.collection('goals').insertOne(newGoal);
       await addXp(db, userId, 25);
-      actionsTaken.push(`Created goal "${goalName}" (+25 XP)`);
-      await logAgentAction(db, userId, 'GOALS', `Created savings goal: ${emoji} ${goalName} with target ₹${target}`, `db.goals.insertOne({ name: "${goalName}", target: ${target} })`);
+      actionsTaken.push(`Created goal "${args.name}" (+25 XP)`);
+      await logActivity(db, userId, { category: 'GOALS', description: `Created savings goal ${newGoal.emoji} ${args.name} (target ₹${target.toLocaleString('en-IN')})` });
       return { success: true, goalId: nextId };
     }
 
     case 'update_goal': {
-      const { goalId, savedAmountToAdd, weeklyTarget } = args;
-      const query = { userId, id: goalId };
-      const goal = await db.collection('goals').findOne(query);
-
-      if (!goal) {
-        return { success: false, error: 'Goal not found' };
-      }
-
+      const goal = await db.collection('goals').findOne({ userId, id: args.goalId });
+      if (!goal) return { success: false, error: 'Goal not found' };
       const updates = {};
-      if (savedAmountToAdd !== undefined) {
-        updates.saved = Math.min(goal.target, (goal.saved || 0) + savedAmountToAdd);
-      }
-      if (weeklyTarget !== undefined) {
-        updates.weeklyTarget = weeklyTarget;
-      }
-
-      reasoningSteps.push({
-        step: reasoningSteps.length + 1,
-        description: `Updating goal ${goalId}: add savings ₹${savedAmountToAdd || 0}, weekly target ₹${weeklyTarget || goal.weeklyTarget}`,
-        mongoOperation: `db.goals.updateOne({ id: ${goalId} }, { $set: ${JSON.stringify(updates)} })`
-      });
-
-      await db.collection('goals').updateOne(query, { $set: updates });
-      if (savedAmountToAdd > 0) {
+      if (args.savedAmountToAdd !== undefined) updates.saved = Math.min(goal.target, (goal.saved || 0) + args.savedAmountToAdd);
+      if (args.weeklyTarget !== undefined) updates.weeklyTarget = args.weeklyTarget;
+      step(`Updated goal "${goal.name}"`);
+      await db.collection('goals').updateOne({ userId, id: args.goalId }, { $set: updates });
+      if (args.savedAmountToAdd > 0) {
         await addXp(db, userId, 20);
-        actionsTaken.push(`Saved ₹${savedAmountToAdd} to "${goal.name}" (+20 XP)`);
-        await logAgentAction(db, userId, 'GOALS', `Deposited ₹${savedAmountToAdd} to goal "${goal.name}". New saved: ₹${updates.saved}`, `db.goals.updateOne({ id: ${goalId} }, { $set: { saved: ${updates.saved} } })`);
+        actionsTaken.push(`Saved ₹${args.savedAmountToAdd} to "${goal.name}" (+20 XP)`);
+        await logActivity(db, userId, { category: 'GOALS', description: `Added ₹${Number(args.savedAmountToAdd).toLocaleString('en-IN')} to ${goal.emoji} ${goal.name}` });
       } else {
-        actionsTaken.push(`Updated target for "${goal.name}"`);
+        actionsTaken.push(`Updated "${goal.name}"`);
       }
-
       return { success: true };
     }
 
     case 'delete_goal': {
-      const { goalId } = args;
-      reasoningSteps.push({
-        step: reasoningSteps.length + 1,
-        description: `Deleting goal ID: ${goalId}`,
-        mongoOperation: `db.goals.deleteOne({ userId: "${userId}", id: ${goalId} })`
-      });
-
-      const res = await db.collection('goals').deleteOne({ userId, id: goalId });
+      const goal = await db.collection('goals').findOne({ userId, id: args.goalId });
+      step(`Deleted goal ${args.goalId}`);
+      const res = await db.collection('goals').deleteOne({ userId, id: args.goalId });
       actionsTaken.push('Goal deleted');
-      await logAgentAction(db, userId, 'GOALS', `Deleted savings goal ID: ${goalId}`, `db.goals.deleteOne({ id: ${goalId} })`);
+      await logActivity(db, userId, { category: 'GOALS', description: `Deleted goal ${goal ? goal.name : args.goalId}` });
       return { success: res.deletedCount > 0 };
     }
 
     default:
-      return { error: 'Unknown tool call' };
+      return { error: 'Unknown tool' };
   }
 }
 
-// CORE CHAT RUNNER LOOP
+// --- Build the per-user RAG context pack injected into the system prompt each turn ---
+async function buildContextPack(db, user) {
+  const userId = user._id;
+  const [txs, goals] = await Promise.all([
+    db.collection('transactions').find({ userId }).toArray(),
+    db.collection('goals').find({ userId }).toArray()
+  ]);
+  const totalIncome = txs.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0);
+  const totalSpent = txs.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0);
+  const { credit, spent } = monthStats(txs);
+  const now = new Date();
+
+  const goalsStr = goals.length
+    ? goals.map(g => `${g.emoji} ${g.name}: ₹${g.saved}/₹${g.target} (target ${g.targetDate || 'n/a'})`).join('; ')
+    : 'none yet';
+  const prefs = (user.spendingPreferences || []).join(', ') || 'not set';
+
+  return `
+--- TODAY ---
+${now.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'full', timeStyle: 'short' })}
+
+--- THIS USER (the only one you can act on) ---
+Name: ${user.name} | Monthly income: ₹${user.monthlyIncome} | Savings mode: ${user.savingsMode} (${Math.round(savingsRateForMode(user.savingsMode) * 100)}% set aside)
+Spending preferences: ${prefs}
+Level: ${user.level} • ${user.xp}/${user.xpToNext} XP
+Balance (MoneyBank): ₹${totalIncome - totalSpent} | This month — credited ₹${credit}, spent ₹${spent} | Saved by AI so far: ₹${user.savedByAi || 0}
+Goals: ${goalsStr}
+${user.chatSummary ? `\n--- MEMORY OF EARLIER CHATS ---\n${user.chatSummary}` : ''}`;
+}
+
+// --- Core chat runner ---
 export async function runAgentChat(userId, userMessage) {
   const db = getDb();
-  
-  // 1. Fetch user memory summary
   const user = await db.collection('users').findOne({ _id: userId });
-  if (!user) {
-    throw new Error('User not found');
-  }
+  if (!user) throw new Error('User not found');
 
-  // 2. Fetch the recent chat history (limit to last 6 for active context)
-  const history = await db.collection('chats')
-    .find({ userId })
-    .sort({ _id: -1 })
-    .limit(6)
-    .toArray();
-  
-  // reverse history to be chronological
+  const history = await db.collection('chats').find({ userId }).sort({ _id: -1 }).limit(6).toArray();
   history.reverse();
 
-  // 3. Assemble chat contents for Gemini
-  // We include:
-  // - System instruction
-  // - Chat memory summary if present
-  // - Current financial data summary for context
-  const txs = await db.collection('transactions').find({ userId }).toArray();
-  const goals = await db.collection('goals').find({ userId }).toArray();
-  const expenseTxs = txs.filter(t => t.type === 'expense');
-  const totalSpent = expenseTxs.reduce((sum, t) => sum + t.amount, 0);
-
-  const contextData = `
---- CURRENT STATE ---
-User Profile: Name: ${user.name}, Income: ₹${user.monthlyIncome}, Mode: ${user.savingsMode}, Level: ${user.level}, XP: ${user.xp}/${user.xpToNext}
-Goals: ${goals.map(g => `${g.name} (${g.emoji}): Saved ₹${g.saved}/₹${g.target}, Weekly Target: ₹${g.weeklyTarget}, Target Date: ${g.targetDate}`).join('; ')}
-Total Spent this month: ₹${totalSpent}
-Category Breakdown: Food: ₹${expenseTxs.filter(t=>t.category==='Food').reduce((s,t)=>s+t.amount,0)}, Transport: ₹${expenseTxs.filter(t=>t.category==='Transport').reduce((s,t)=>s+t.amount,0)}, Studies: ₹${expenseTxs.filter(t=>t.category==='Studies').reduce((s,t)=>s+t.amount,0)}, Entertainment: ₹${expenseTxs.filter(t=>t.category==='Entertainment').reduce((s,t)=>s+t.amount,0)}, Subscriptions: ₹${expenseTxs.filter(t=>t.category==='Subscriptions').reduce((s,t)=>s+t.amount,0)}
-  `;
-
-  const memoryContext = user.chatSummary ? `\n--- PREVIOUS CHAT MEMORY SUMMARY ---\n${user.chatSummary}\n` : '';
-
+  const contextPack = await buildContextPack(db, user);
   const model = genAI.getGenerativeModel({
-    model: 'gemini-2.0-flash',
-    systemInstruction: systemInstruction + memoryContext + contextData,
+    model: MODEL,
+    systemInstruction: systemInstruction + '\n' + contextPack
   });
 
-  // Convert DB history to standard Gemini contents format
-  const contents = [];
-  for (const msg of history) {
-    contents.push({
-      role: msg.sender === 'user' ? 'user' : 'model',
-      parts: [{ text: msg.text }]
-    });
-  }
+  const contents = history.map(m => ({
+    role: m.sender === 'user' ? 'user' : 'model',
+    parts: [{ text: m.text }]
+  }));
+  contents.push({ role: 'user', parts: [{ text: userMessage }] });
 
-  // Add the new user message
-  contents.push({
-    role: 'user',
-    parts: [{ text: userMessage }]
-  });
-
-  // Track actions and reasoning steps
   const reasoningSteps = [];
   const actionsTaken = [];
 
-  console.log(`Starting Gemini session for user ${user.name}...`);
+  let result = await model.generateContent({ contents, tools: [{ functionDeclarations }] });
+  let response = result.response;
+  let calls = (typeof response.functionCalls === 'function' ? response.functionCalls() : null) || [];
 
-  // Call generative model
-  let response = await model.generateContent({
-    contents,
-    tools: [{ functionDeclarations }]
-  });
-
-  // Loop to handle potential multiple function calls (multitasking!)
   let count = 0;
-  // Limit loop count to 5 to avoid infinite loops
-  while (response.functionCalls && count < 5) {
+  while (calls.length && count < 5) {
     count++;
-    const functionCalls = response.functionCalls;
-    const toolResults = [];
-
-    // Execute all tool calls requested in this turn
-    for (const call of functionCalls) {
-      const result = await executeTool(db, userId, call, reasoningSteps, actionsTaken);
-      toolResults.push({
-        functionResponse: {
-          name: call.name,
-          response: { result }
-        }
-      });
-    }
-
-    // Append model output (with function calls) to history
     contents.push(response.candidates[0].content);
-
-    // Append function call results as a user role response
-    contents.push({
-      role: 'user',
-      parts: toolResults
-    });
-
-    // Request next response from Gemini
-    response = await model.generateContent({
-      contents,
-      tools: [{ functionDeclarations }]
-    });
+    const toolParts = [];
+    for (const call of calls) {
+      const r = await executeTool(db, userId, call, reasoningSteps, actionsTaken);
+      toolParts.push({ functionResponse: { name: call.name, response: { result: r } } });
+    }
+    contents.push({ role: 'user', parts: toolParts });
+    result = await model.generateContent({ contents, tools: [{ functionDeclarations }] });
+    response = result.response;
+    calls = (typeof response.functionCalls === 'function' ? response.functionCalls() : null) || [];
   }
 
-  const finalResponseText = response.text || "I've processed your request.";
+  let finalResponseText = "Done! Anything else?";
+  try {
+    const t = response.text();
+    if (t && t.trim()) finalResponseText = t;
+  } catch { /* response had only tool calls */ }
 
-  // 4. Save User Message in database
-  const userMsgId = `msg-user-${Date.now()}`;
-  await db.collection('chats').insertOne({
-    id: userMsgId,
-    userId,
-    sender: 'user',
-    text: userMessage,
-    timestamp: 'Just now'
-  });
-
-  // 5. Save Agent Message in database (with reasoning/actions)
+  const now = new Date().toISOString();
+  await db.collection('chats').insertOne({ id: `msg-user-${Date.now()}`, userId, sender: 'user', text: userMessage, date: now });
   const agentMsgId = `msg-agent-${Date.now()}`;
   await db.collection('chats').insertOne({
-    id: agentMsgId,
-    userId,
-    sender: 'agent',
-    text: finalResponseText,
-    timestamp: 'Just now',
-    reasoning: reasoningSteps,
-    actionsTaken
+    id: agentMsgId, userId, sender: 'agent', text: finalResponseText, date: now,
+    reasoning: reasoningSteps, actionsTaken
   });
 
-  // 6. Check Memory Limits: if active messages > 10, summarize older chat
   const chatCount = await db.collection('chats').countDocuments({ userId });
-  if (chatCount > 10) {
-    console.log(`User ${userId} chat history has ${chatCount} messages (exceeds 10). Summarizing memory...`);
-    await summarizeUserChatHistory(db, userId, user.chatSummary);
+  if (chatCount > 12) {
+    try { await summarizeUserChatHistory(db, userId, user.chatSummary); }
+    catch (e) { console.warn('Summarization skipped:', e.message); }
   }
 
-  return {
-    id: agentMsgId,
-    sender: 'agent',
-    text: finalResponseText,
-    timestamp: 'Just now',
-    reasoning: reasoningSteps,
-    actionsTaken
-  };
+  return { id: agentMsgId, sender: 'agent', text: finalResponseText, date: now, reasoning: reasoningSteps, actionsTaken };
 }
 
-// SUMMARIZATION HELPER
+// --- Rolling memory summary for long conversations ---
 async function summarizeUserChatHistory(db, userId, currentSummary) {
-  // Load all chats for this user
-  const allChats = await db.collection('chats')
-    .find({ userId })
-    .sort({ _id: 1 })
-    .toArray();
-  
-  // Format history as string
-  const formattedHistory = allChats.map(c => `${c.sender === 'user' ? 'User' : 'Agent'}: ${c.text}`).join('\n');
+  const allChats = await db.collection('chats').find({ userId }).sort({ _id: 1 }).toArray();
+  const formatted = allChats.map(c => `${c.sender === 'user' ? 'User' : 'Agent'}: ${c.text}`).join('\n');
+  const prompt = `You maintain the long-term memory of a student's finance chat. Merge the previous summary with the new conversation into one concise memory (<150 words). Preserve: profile/preference changes, active goals & targets, recurring bills/subscriptions, and recent habits or warnings. No greetings or preamble.
+${currentSummary ? `\n--- PREVIOUS SUMMARY ---\n${currentSummary}\n` : ''}
+--- CONVERSATION ---
+${formatted}`;
 
-  const summarizerPrompt = `
-You are a memory processor for a student financial management chatbot.
-Your job is to read the existing conversation history and compile/merge it with any previous memory summary to create a unified, updated, concise memory summary.
-Make sure to preserve:
-- Any user profile changes, preferences or modes.
-- Current active goals targets and milestones.
-- Important recurring subscription details or upcoming bills mentioned.
-- Recent warnings or habits (e.g. overspent on Food, behind schedule on Goa Trip).
+  const model = genAI.getGenerativeModel({ model: MODEL });
+  const result = await model.generateContent({ contents: [{ role: 'user', parts: [{ text: prompt }] }] });
+  let newSummary = '';
+  try { newSummary = result.response.text(); } catch { newSummary = currentSummary || ''; }
 
-Keep the summary strictly under 150 words. Do not add chat greetings or preamble.
+  await db.collection('users').updateOne({ _id: userId }, { $set: { chatSummary: newSummary } });
 
-${currentSummary ? `--- PREVIOUS SUMMARY ---\n${currentSummary}\n` : ''}
---- CONVERSATION HISTORY ---
-${formattedHistory}
-`;
-
-  const model = genAI.getGenerativeModel({
-    model: 'gemini-2.0-flash',
-  });
-
-  const response = await model.generateContent({
-    contents: [{ role: 'user', parts: [{ text: summarizerPrompt }] }]
-  });
-
-  const newSummary = response.text || 'No summary generated.';
-  console.log(`Generated new chat summary memory for user ${userId}:`, newSummary);
-
-  // Update user document
-  await db.collection('users').updateOne(
-    { _id: userId },
-    { $set: { chatSummary: newSummary } }
-  );
-
-  // Delete older chats, keeping only the last 4 messages in DB for active window
-  const keepCount = 4;
-  const chatsToKeep = await db.collection('chats')
-    .find({ userId })
-    .sort({ _id: -1 })
-    .limit(keepCount)
-    .toArray();
-  
-  const keepIds = chatsToKeep.map(c => c._id);
-  
-  await db.collection('chats').deleteMany({
-    userId,
-    _id: { $nin: keepIds }
-  });
-
-  console.log(`Truncated chat history database to retain last ${keepCount} messages.`);
+  // Keep only the last 4 messages live; older ones now live in the summary.
+  const keep = await db.collection('chats').find({ userId }).sort({ _id: -1 }).limit(4).toArray();
+  const keepIds = keep.map(c => c._id);
+  await db.collection('chats').deleteMany({ userId, _id: { $nin: keepIds } });
 }

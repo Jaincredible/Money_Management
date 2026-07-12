@@ -1,73 +1,60 @@
-# React + TypeScript + Vite
+# FinAgent — AI Student Money Co-Pilot
 
-This template provides a minimal setup to get React working in Vite with HMR & some ESLint rules.
+A prototype personal-finance app for students, driven by a Gemini AI agent that can log
+spending, manage savings goals, and answer questions in natural language — with full JWT
+auth, per-user data, and a live dashboard.
 
-Currently, two official plugins are available:
+## Stack
+- **Frontend:** Vite + React + TypeScript + Tailwind + Zustand + Recharts
+- **Backend:** Express + MongoDB (`mongodb` driver) + Gemini (`@google/generative-ai`)
+- **Auth:** JWT (`jsonwebtoken`) + password hashing (`bcryptjs`)
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+## Run it (two terminals)
 
-## React Compiler
+**1. Backend** (`server/`)
+```bash
+cd server
+npm install
+npm run dev        # or: npm start   → http://localhost:5000
+```
+On first boot it seeds 10 demo accounts automatically.
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+**2. Frontend** (repo root)
+```bash
+npm install
+npm run dev        # → http://localhost:5173  (proxies /api to :5000)
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+Open **http://localhost:5173** and either:
+- Click **“Explore the demo”** for a one-click bypass into a fully-loaded account, or
+- **Sign up** a fresh account (starts empty), or
+- **Log in** to any demo account — username `arjun`, `priya`, `rahul`, … · password `finagent`.
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
-
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+## Environment (`server/.env`)
 ```
+MONGODB_URI=<your Atlas SRV uri>
+GEMINI_API_KEY=<your key>
+GEMINI_MODEL=gemini-2.5-flash     # swappable, e.g. gemini-flash-latest
+JWT_SECRET=<random secret>
+DEMO_PASSWORD=finagent
+PORT=5000
+```
+
+## MongoDB Atlas note
+If Atlas is unreachable (you'll see a TLS `alert 80` warning on boot), the backend
+**automatically falls back to a local file DB (`server/db.json`)** so the app always runs.
+To use the real cluster, add your machine's IP in **Atlas → Network Access → Add IP →
+Allow Access from Anywhere (0.0.0.0/0)** — the `alert 80` error is Atlas refusing a
+non-whitelisted IP at the TLS layer.
+
+## What the AI agent can do
+Chat naturally (“I spent ₹250 on lunch and add ₹500 to my Goa Trip”) — it uses tools to
+add/read/delete transactions & goals, update your profile, allocate savings, and check the
+date. It knows **only your** data (per-user context + rolling memory summary) and refuses
+destructive or cross-account requests. Clear the conversation anytime from the Agent tab.
+
+## Security highlights
+- All data routes live under `/api/me/*` and derive the user **from the JWT**, never from a
+  client-supplied id (no IDOR).
+- Passwords are bcrypt-hashed; hashes are never returned to the client.
+- The agent has no raw-query capability and is scoped to the signed-in user.

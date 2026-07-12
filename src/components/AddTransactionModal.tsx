@@ -1,299 +1,171 @@
-import React, { useState, useEffect } from 'react';
-import { X, Sparkles, Database } from 'lucide-react';
-import { useTransactionsStore, useInsightsStore, useUserStore, useAgentStore } from '../stores/useFinanceStore';
+import React, { useState } from 'react';
+import { X, Sparkles, Loader2, Check } from 'lucide-react';
+import { useTransactionsStore, useAgentStore } from '../stores/useFinanceStore';
+import { catMeta, inr } from '../lib/constants';
 
-interface AddTransactionModalProps {
+interface Props {
   isOpen: boolean;
   onClose: () => void;
   initialType?: 'income' | 'expense';
 }
 
-export default function AddTransactionModal({ isOpen, onClose, initialType = 'expense' }: AddTransactionModalProps) {
+const EXPENSE_CATS = ['Food', 'Groceries', 'Transport', 'Travel', 'Studies', 'Entertainment', 'Sports', 'Shopping', 'Subscriptions', 'Fitness', 'Other'];
+const INCOME_CATS = ['Salary', 'Allowance', 'Freelance', 'Gift', 'Other'];
+
+function autoCategorize(desc: string, type: 'income' | 'expense'): string {
+  if (type === 'income') return 'Salary';
+  const t = desc.toLowerCase();
+  const has = (...w: string[]) => w.some((x) => t.includes(x));
+  if (has('zomato', 'swiggy', 'lunch', 'dinner', 'food', 'coffee', 'tea', 'canteen', 'mess', 'cafe', 'burger', 'pizza')) return 'Food';
+  if (has('grocery', 'groceries', 'instamart', 'bigbasket', 'blinkit', 'milk', 'vegetable')) return 'Groceries';
+  if (has('uber', 'ola', 'auto', 'cab', 'metro', 'bus', 'train', 'petrol', 'fuel')) return 'Transport';
+  if (has('flight', 'trip', 'hostel', 'hotel', 'irctc', 'travel', 'goa', 'vacation')) return 'Travel';
+  if (has('book', 'course', 'exam', 'tuition', 'stationery', 'lab', 'print')) return 'Studies';
+  if (has('spotify', 'netflix', 'prime', 'youtube', 'icloud', 'subscription')) return 'Subscriptions';
+  if (has('turf', 'cricket', 'football', 'badminton', 'match', 'sports')) return 'Sports';
+  if (has('gym', 'protein', 'yoga', 'fitness', 'workout')) return 'Fitness';
+  if (has('movie', 'concert', 'game', 'gaming', 'party', 'bowling')) return 'Entertainment';
+  if (has('shoe', 'hoodie', 'shirt', 'headphone', 'amazon', 'flipkart', 'myntra', 'shopping')) return 'Shopping';
+  return 'Other';
+}
+
+export default function AddTransactionModal({ isOpen, onClose, initialType = 'expense' }: Props) {
   const [type, setType] = useState<'income' | 'expense'>(initialType);
-  const [category, setCategory] = useState<string>('');
-  const [amount, setAmount] = useState<string>('');
-  const [description, setDescription] = useState<string>('');
-  const [letAgentCategorize, setLetAgentCategorize] = useState<boolean>(true);
-  
-  // Loading flow state
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [submitStep, setSubmitStep] = useState(0); // 0: none, 1: parsing, 2: writing, 3: completed
+  const [category, setCategory] = useState(initialType === 'expense' ? 'Food' : 'Salary');
+  const [amount, setAmount] = useState('');
+  const [description, setDescription] = useState('');
+  const [letAgentCategorize, setLetAgentCategorize] = useState(true);
+  const [step, setStep] = useState(0); // 0 idle, 1 understanding, 2 saving, 3 done
+  const [error, setError] = useState('');
 
   const { addTransaction } = useTransactionsStore();
-  const { recalculateInsights } = useInsightsStore();
-  const { addXp } = useUserStore();
-  const { addActivityLog } = useAgentStore();
-
-  useEffect(() => {
-    setType(initialType);
-    setCategory(initialType === 'expense' ? 'Food' : 'Salary');
-    setAmount('');
-    setDescription('');
-  }, [initialType, isOpen]);
+  const { setCurrentNotification } = useAgentStore();
 
   if (!isOpen) return null;
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const switchType = (t: 'income' | 'expense') => { setType(t); setCategory(t === 'expense' ? 'Food' : 'Salary'); };
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!amount || parseFloat(amount) <= 0) return;
-
-    setIsSubmitting(true);
-    setSubmitStep(1);
-
-    // Step 1: Simulated AI Parsing (500ms)
-    setTimeout(() => {
-      setSubmitStep(2);
-      
-      // Step 2: Simulated MongoDB Write (500ms)
-      setTimeout(() => {
-        setSubmitStep(3);
-        
-        // Step 3: Execution and store update (500ms)
-        setTimeout(() => {
-          const finalCategory = letAgentCategorize
-            ? autoCategorize(description, type)
-            : category;
-
-          // Add to transactions
-          addTransaction({
-            type,
-            category: finalCategory as any,
-            amount: parseFloat(amount),
-            description: description || (type === 'income' ? 'Received Funds' : 'Expense'),
-          });
-
-          // Trigger state changes
-          // Use setTimeout to ensure transactions are updated
-          setTimeout(() => {
-            const currentTxs = useTransactionsStore.getState().transactions;
-            recalculateInsights(currentTxs);
-          }, 0);
-
-          // Add XP
-          addXp(15);
-
-          // Add activity log
-          addActivityLog({
-            category: type === 'income' ? 'INCOME' : 'EXPENSE',
-            description: `${type === 'income' ? 'Income' : 'Expense'} of ₹${amount} logged under ${finalCategory}${letAgentCategorize ? ' (auto-categorized by AI)' : ''}.`,
-            mongoOperation: `db.transactions.insertOne({ type: "${type}", category: "${finalCategory}", amount: ${amount}, description: "${description}" })`
-          });
-
-          setIsSubmitting(false);
-          setSubmitStep(0);
-          onClose();
-        }, 500);
-      }, 500);
-    }, 500);
+    if (!amount || parseFloat(amount) <= 0) { setError('Enter a valid amount.'); return; }
+    setError('');
+    setStep(1);
+    const finalCategory = letAgentCategorize ? autoCategorize(description, type) : category;
+    await new Promise((r) => setTimeout(r, 450));
+    setStep(2);
+    try {
+      const res = await addTransaction({
+        type, category: finalCategory,
+        amount: parseFloat(amount),
+        description: description || (type === 'income' ? 'Income' : 'Expense'),
+      });
+      setStep(3);
+      await new Promise((r) => setTimeout(r, 450));
+      if (type === 'income' && res?.allocation?.pool > 0) {
+        setCurrentNotification({
+          emoji: '🤖', title: 'Savings allocated',
+          message: `I set aside ${inr(res.allocation.pool)} across your goals from this income.`,
+        });
+      }
+      onClose();
+    } catch (err: any) {
+      setError(err.message || 'Failed to save.');
+      setStep(0);
+    }
   };
 
-  // Simple auto-categorization helper based on keywords
-  const autoCategorize = (desc: string, txType: 'income' | 'expense'): string => {
-    if (txType === 'income') return 'Salary';
-    const text = desc.toLowerCase();
-    if (text.includes('burger') || text.includes('zomato') || text.includes('food') || text.includes('lunch') || text.includes('dinner') || text.includes('swiggy') || text.includes('tea') || text.includes('coffee') || text.includes('canteen')) {
-      return 'Food';
-    }
-    if (text.includes('uber') || text.includes('ola') || text.includes('auto') || text.includes('cab') || text.includes('metro') || text.includes('train') || text.includes('bus') || text.includes('petrol')) {
-      return 'Transport';
-    }
-    if (text.includes('book') || text.includes('copy') || text.includes('studies') || text.includes('exam') || text.includes('course') || text.includes('tuition')) {
-      return 'Studies';
-    }
-    if (text.includes('movie') || text.includes('netflix') || text.includes('spotify') || text.includes('youtube') || text.includes('prime')) {
-      return text.includes('spotify') || text.includes('netflix') ? 'Subscriptions' : 'Entertainment';
-    }
-    if (text.includes('game') || text.includes('arcade') || text.includes('concert') || text.includes('party')) {
-      return 'Entertainment';
-    }
-    return category; // fallback to selected
-  };
+  const cats = type === 'expense' ? EXPENSE_CATS : INCOME_CATS;
+  const isBusy = step > 0;
 
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 backdrop-blur-sm animate-fade-in p-4">
-      {/* Click outside to close (only if not submitting) */}
-      {!isSubmitting && (
-        <div className="absolute inset-0" onClick={onClose} />
-      )}
+      {!isBusy && <div className="absolute inset-0" onClick={onClose} />}
+      <div className="relative w-full max-w-md bg-slate-900 border border-white/10 rounded-t-3xl rounded-b-xl shadow-2xl p-6 z-10">
 
-      {/* Modal Container */}
-      <div className="relative w-full max-w-md bg-slate-900 border border-white/10 rounded-t-3xl rounded-b-xl shadow-2xl p-6 overflow-hidden z-10 transition-transform">
-        
-        {/* Loading overlay */}
-        {isSubmitting && (
-          <div className="absolute inset-0 bg-slate-900/95 flex flex-col items-center justify-center p-6 z-20">
-            <div className="w-16 h-16 rounded-full bg-indigo-500/10 flex items-center justify-center mb-6 animate-pulse border border-indigo-500/20">
-              <Database className="text-indigo-400 animate-bounce" size={24} />
+        {/* Syncing overlay (human-readable, no DB commands) */}
+        {isBusy && (
+          <div className="absolute inset-0 bg-slate-900/95 flex flex-col items-center justify-center p-6 z-20 rounded-t-3xl rounded-b-xl">
+            <div className="w-14 h-14 rounded-2xl bg-indigo-500/10 flex items-center justify-center mb-6 border border-indigo-500/20">
+              <Sparkles className="text-indigo-400 animate-pulse" size={24} />
             </div>
-            
-            <h3 className="text-lg font-bold text-white mb-4">FinAgent Syncing</h3>
-            
-            <div className="w-full max-w-xs space-y-3 font-mono text-xs">
-              <div className="flex items-center gap-2">
-                <span className={`w-2 h-2 rounded-full ${submitStep >= 1 ? 'bg-indigo-400' : 'bg-slate-700'}`} />
-                <span className={submitStep >= 1 ? 'text-indigo-300' : 'text-slate-500'}>
-                  {submitStep === 1 ? '🤖 Agent parsing intent...' : '✓ Intent parsed'}
-                </span>
-              </div>
-              
-              <div className="flex items-center gap-2">
-                <span className={`w-2 h-2 rounded-full ${submitStep >= 2 ? 'bg-amber-400' : 'bg-slate-700'}`} />
-                <span className={submitStep >= 2 ? 'text-amber-300' : 'text-slate-500'}>
-                  {submitStep === 2 ? '⚡ MongoDB Atlas MCP: db.transactions.insertOne()' : submitStep > 2 ? '✓ Stored in MongoDB' : 'db.transactions.insertOne()'}
-                </span>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <span className={`w-2 h-2 rounded-full ${submitStep >= 3 ? 'bg-emerald-400 animate-pulse' : 'bg-slate-700'}`} />
-                <span className={submitStep >= 3 ? 'text-emerald-300' : 'text-slate-500'}>
-                  {submitStep === 3 ? '✓ Action Complete. Ready!' : 'Done'}
-                </span>
-              </div>
+            <h3 className="text-base font-bold text-white mb-4">FinAgent is on it</h3>
+            <div className="w-full max-w-xs space-y-3 text-xs">
+              {[
+                { n: 1, on: 'Understanding your entry…', done: 'Understood your entry' },
+                { n: 2, on: 'Saving & categorising…', done: 'Saved and categorised' },
+                { n: 3, on: 'Updating your dashboard…', done: 'All set!' },
+              ].map((s) => (
+                <div key={s.n} className="flex items-center gap-2">
+                  <span className={`w-4 h-4 rounded-full flex items-center justify-center ${step >= s.n ? 'bg-indigo-500' : 'bg-slate-700'}`}>
+                    {step > s.n ? <Check size={10} className="text-white" /> : step === s.n ? <Loader2 size={10} className="text-white animate-spin" /> : null}
+                  </span>
+                  <span className={step >= s.n ? 'text-slate-200' : 'text-slate-500'}>{step > s.n ? s.done : s.on}</span>
+                </div>
+              ))}
             </div>
           </div>
         )}
 
-        {/* Header */}
-        <div className="flex justify-between items-center mb-6">
-          <h2 className="text-lg font-bold text-white flex items-center gap-2">
-            <span>{type === 'expense' ? 'Add Expense' : 'Add Income'}</span>
-            <span className="text-[10px] bg-slate-800 text-slate-400 border border-white/5 px-2 py-0.5 rounded-full font-mono font-medium">
-              MongoDB Atlas MCP
-            </span>
-          </h2>
-          <button
-            onClick={onClose}
-            className="p-1 rounded-full bg-slate-800 text-slate-400 hover:text-white"
-          >
-            <X size={16} />
-          </button>
+        <div className="flex justify-between items-center mb-5">
+          <h2 className="text-lg font-bold text-white">{type === 'expense' ? 'Add Expense' : 'Add Income'}</h2>
+          <button onClick={onClose} className="p-1 rounded-full bg-slate-800 text-slate-400 hover:text-white"><X size={16} /></button>
         </div>
 
-        {/* Form */}
         <form onSubmit={handleSubmit} className="space-y-4">
-          
-          {/* Toggle Type */}
+          {/* Type toggle */}
           <div className="flex bg-slate-950 p-1 rounded-full border border-white/5">
-            <button
-              type="button"
-              onClick={() => {
-                setType('expense');
-                setCategory('Food');
-              }}
-              className={`flex-1 py-1.5 rounded-full text-xs font-semibold transition-all ${
-                type === 'expense' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              Expense
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setType('income');
-                setCategory('Salary');
-              }}
-              className={`flex-1 py-1.5 rounded-full text-xs font-semibold transition-all ${
-                type === 'income' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              Income
-            </button>
+            <button type="button" onClick={() => switchType('expense')} className={`flex-1 py-1.5 rounded-full text-xs font-semibold transition-all ${type === 'expense' ? 'bg-rose-600 text-white shadow' : 'text-slate-400 hover:text-white'}`}>Expense</button>
+            <button type="button" onClick={() => switchType('income')} className={`flex-1 py-1.5 rounded-full text-xs font-semibold transition-all ${type === 'income' ? 'bg-emerald-600 text-white shadow' : 'text-slate-400 hover:text-white'}`}>Income</button>
           </div>
 
-          {/* Amount input */}
+          {error && <p className="text-[11px] text-rose-400 font-semibold text-center">{error}</p>}
+
           <div className="space-y-1">
             <label className="text-xs text-slate-400 font-medium">Amount (₹)</label>
             <div className="relative">
               <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 font-bold text-lg">₹</span>
-              <input
-                type="number"
-                required
-                value={amount}
-                onChange={(e) => setAmount(e.target.value)}
-                placeholder="0.00"
-                className="w-full bg-slate-950 border border-white/10 rounded-xl py-3 pl-8 pr-4 text-white text-lg font-bold focus:outline-none focus:border-indigo-500 transition-colors"
-              />
+              <input type="number" required value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0"
+                className="w-full bg-slate-950 border border-white/10 rounded-xl py-3 pl-8 pr-4 text-white text-lg font-bold focus:outline-none focus:border-indigo-500" />
             </div>
           </div>
 
-          {/* Description input */}
           <div className="space-y-1">
             <label className="text-xs text-slate-400 font-medium">Description</label>
-            <input
-              type="text"
-              required
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              placeholder={type === 'expense' ? 'e.g., Dinner at canteen, uber fare' : 'e.g., Stipend, cash from dad'}
-              className="w-full bg-slate-950 border border-white/10 rounded-xl py-2.5 px-4 text-white text-sm focus:outline-none focus:border-indigo-500 transition-colors"
-            />
+            <input type="text" value={description} onChange={(e) => setDescription(e.target.value)}
+              placeholder={type === 'expense' ? 'e.g. Zomato dinner, Uber to campus' : 'e.g. Monthly stipend, freelance gig'}
+              className="w-full bg-slate-950 border border-white/10 rounded-xl py-2.5 px-4 text-white text-sm focus:outline-none focus:border-indigo-500" />
           </div>
 
-          {/* Category Dropdown (disabled if letting agent categorize) */}
           <div className="space-y-1">
             <div className="flex justify-between items-center">
               <label className="text-xs text-slate-400 font-medium">Category</label>
-              {letAgentCategorize && (
-                <span className="text-[10px] text-indigo-400 flex items-center gap-0.5">
-                  <Sparkles size={10} />
-                  Agent will auto-categorize
-                </span>
+              {letAgentCategorize && type === 'expense' && (
+                <span className="text-[10px] text-indigo-400 flex items-center gap-0.5"><Sparkles size={10} /> Agent will auto-categorise</span>
               )}
             </div>
-            <select
-              value={category}
-              onChange={(e) => setCategory(e.target.value)}
-              disabled={letAgentCategorize}
-              className={`w-full bg-slate-950 border border-white/10 rounded-xl py-2.5 px-4 text-white text-sm focus:outline-none focus:border-indigo-500 transition-colors ${
-                letAgentCategorize ? 'opacity-40 cursor-not-allowed' : ''
-              }`}
-            >
-              {type === 'expense' ? (
-                <>
-                  <option value="Food">Food 🍔</option>
-                  <option value="Transport">Transport 🚌</option>
-                  <option value="Studies">Studies 📚</option>
-                  <option value="Entertainment">Entertainment 🎮</option>
-                  <option value="Subscriptions">Subscriptions 📱</option>
-                  <option value="Other">Other 💳</option>
-                </>
-              ) : (
-                <>
-                  <option value="Salary">Stipend/Salary 💰</option>
-                  <option value="Other">Other 💸</option>
-                </>
-              )}
+            <select value={category} onChange={(e) => setCategory(e.target.value)} disabled={letAgentCategorize && type === 'expense'}
+              className={`w-full bg-slate-950 border border-white/10 rounded-xl py-2.5 px-4 text-white text-sm focus:outline-none focus:border-indigo-500 ${letAgentCategorize && type === 'expense' ? 'opacity-40' : ''}`}>
+              {cats.map((c) => <option key={c} value={c}>{catMeta(c).emoji} {c}</option>)}
             </select>
           </div>
 
-          {/* Agent toggle */}
-          <div className="flex items-center justify-between bg-slate-950/50 p-3 rounded-xl border border-white/5">
-            <div className="flex items-center gap-2">
-              <Sparkles className="text-indigo-400" size={16} />
-              <div className="text-left">
-                <p className="text-xs text-white font-medium">Let Agent Categorize</p>
-                <p className="text-[9px] text-slate-500">Gemini parses description and auto-assigns</p>
+          {type === 'expense' && (
+            <div className="flex items-center justify-between bg-slate-950/50 p-3 rounded-xl border border-white/5">
+              <div className="flex items-center gap-2">
+                <Sparkles className="text-indigo-400" size={16} />
+                <div className="text-left">
+                  <p className="text-xs text-white font-medium">Let Agent categorise</p>
+                  <p className="text-[9px] text-slate-500">Reads your note and picks the category</p>
+                </div>
               </div>
+              <button type="button" onClick={() => setLetAgentCategorize((v) => !v)} className={`w-10 h-6 flex items-center rounded-full p-1 transition-colors ${letAgentCategorize ? 'bg-indigo-500' : 'bg-slate-700'}`}>
+                <div className={`bg-white w-4 h-4 rounded-full shadow transition-transform ${letAgentCategorize ? 'translate-x-4' : ''}`} />
+              </button>
             </div>
-            <button
-              type="button"
-              onClick={() => setLetAgentCategorize(!letAgentCategorize)}
-              className={`w-10 h-6 flex items-center rounded-full p-1 transition-colors ${
-                letAgentCategorize ? 'bg-indigo-500' : 'bg-slate-700'
-              }`}
-            >
-              <div className={`bg-white w-4 h-4 rounded-full shadow transition-transform ${
-                letAgentCategorize ? 'translate-x-4' : 'translate-x-0'
-              }`} />
-            </button>
-          </div>
+          )}
 
-          {/* Submit Button */}
-          <button
-            type="submit"
-            className="w-full py-3 bg-indigo-gradient hover:from-indigo-600 hover:to-violet-700 text-white rounded-full font-semibold text-sm shadow-indigo-glow transition-all flex items-center justify-center gap-2"
-          >
-            <span>Log Transaction</span>
+          <button type="submit" className="w-full py-3 bg-indigo-gradient hover:from-indigo-600 hover:to-violet-700 text-white rounded-full font-semibold text-sm shadow-indigo-glow transition-all">
+            {type === 'expense' ? 'Log Expense' : 'Log Income'}
           </button>
         </form>
       </div>

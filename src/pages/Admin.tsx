@@ -13,16 +13,16 @@ export default function Admin() {
 
   // Live Agent activity logger simulation
   const [liveLogs, setLiveLogs] = useState<Array<{ time: string; hash: string; type: string; op: string }>>([
-    { time: '14:32:07', hash: 'usr_a3f...9c2', type: 'GOAL_UPDATE', op: 'db.goals.updateOne()' },
-    { time: '14:31:55', hash: 'usr_b8d...1e4', type: 'EXPENSE_LOG', op: 'db.transactions.insertOne()' },
-    { time: '14:31:43', hash: 'usr_c2a...7f1', type: 'BUDGET_ALERT', op: 'db.alerts.insertOne()' },
-    { time: '14:31:30', hash: 'usr_d9e...3b8', type: 'INCOME_ALLOC', op: 'db.goals.updateMany()' },
-    { time: '14:31:12', hash: 'usr_e1c...5d0', type: 'BILL_REMINDER', op: 'db.alerts.insertOne()' },
-    { time: '14:30:58', hash: 'usr_f5a...8b9', type: 'CHALLENGE_JOIN', op: 'db.challenges.updateOne()' },
-    { time: '14:30:42', hash: 'usr_a3f...9c2', type: 'EXPENSE_LOG', op: 'db.transactions.insertOne()' },
-    { time: '14:30:15', hash: 'usr_d9e...3b8', type: 'REWARD_EARNT', op: 'db.rewards.updateOne()' },
-    { time: '14:29:50', hash: 'usr_g4b...2c4', type: 'GOAL_CREATE', op: 'db.goals.insertOne()' },
-    { time: '14:29:21', hash: 'usr_b8d...1e4', type: 'EXPENSE_LOG', op: 'db.transactions.insertOne()' },
+    { time: '14:32:07', hash: 'usr_a3f...9c2', type: 'GOAL_UPDATE', op: 'Updated a savings goal' },
+    { time: '14:31:55', hash: 'usr_b8d...1e4', type: 'EXPENSE_LOG', op: 'Logged & categorised an expense' },
+    { time: '14:31:43', hash: 'usr_c2a...7f1', type: 'BUDGET_ALERT', op: 'Sent a budget alert' },
+    { time: '14:31:30', hash: 'usr_d9e...3b8', type: 'INCOME_ALLOC', op: 'Auto-allocated income to goals' },
+    { time: '14:31:12', hash: 'usr_e1c...5d0', type: 'BILL_REMINDER', op: 'Set a bill reminder' },
+    { time: '14:30:58', hash: 'usr_f5a...8b9', type: 'CHALLENGE_JOIN', op: 'Joined a savings challenge' },
+    { time: '14:30:42', hash: 'usr_a3f...9c2', type: 'EXPENSE_LOG', op: 'Logged & categorised an expense' },
+    { time: '14:30:15', hash: 'usr_d9e...3b8', type: 'REWARD_EARNT', op: 'Awarded a reward badge' },
+    { time: '14:29:50', hash: 'usr_g4b...2c4', type: 'GOAL_CREATE', op: 'Created a new goal' },
+    { time: '14:29:21', hash: 'usr_b8d...1e4', type: 'EXPENSE_LOG', op: 'Logged & categorised an expense' },
   ]);
 
   useEffect(() => {
@@ -33,13 +33,13 @@ export default function Admin() {
       const hashes = ['usr_a3f...9c2', 'usr_b8d...1e4', 'usr_c2a...7f1', 'usr_d9e...3b8', 'usr_e1c...5d0', 'usr_f5a...8b9', 'usr_z9a...1a2'];
       const types = ['EXPENSE_LOG', 'GOAL_UPDATE', 'BUDGET_ALERT', 'INCOME_ALLOC', 'BILL_REMINDER', 'CHALLENGE_CREATE', 'REWARD_CLAIM'];
       const ops = [
-        'db.transactions.insertOne()',
-        'db.goals.updateOne()',
-        'db.alerts.insertOne()',
-        'db.goals.updateMany()',
-        'db.alerts.insertOne()',
-        'db.challenges.insertOne()',
-        'db.rewards.updateOne()'
+        'Logged & categorised an expense',
+        'Updated a savings goal',
+        'Sent a budget alert',
+        'Auto-allocated income to goals',
+        'Set a bill reminder',
+        'Created a savings challenge',
+        'Awarded a reward badge'
       ];
 
       const randIdx = Math.floor(Math.random() * hashes.length);
@@ -506,7 +506,7 @@ export default function Admin() {
               <div className="glass-card rounded-2xl p-4 text-left">
                 <p className="text-[10px] uppercase font-bold text-slate-500 tracking-wider">Avg Response Time</p>
                 <p className="text-2xl font-extrabold text-white mt-1">1.3s</p>
-                <span className="text-[9px] font-bold text-indigo-400 font-mono mt-1 block">Gemini + MongoDB MCP</span>
+                <span className="text-[9px] font-bold text-indigo-400 font-mono mt-1 block">Gemini + Database</span>
               </div>
             </div>
 
@@ -641,7 +641,7 @@ export default function Admin() {
                 <div className="flex justify-between items-center py-2.5">
                   <div className="flex items-center gap-2">
                     <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                    <span className="text-slate-300 font-bold">MongoDB Atlas MCP</span>
+                    <span className="text-slate-300 font-bold">Database (MongoDB)</span>
                   </div>
                   <div className="flex items-center gap-3">
                     <span className="text-emerald-400 bg-emerald-950/60 border border-emerald-500/10 px-2 py-0.5 rounded font-bold text-[9px] tracking-wide uppercase">Operational</span>

@@ -1,10 +1,19 @@
 import { create } from 'zustand';
+import { apiFetch, setToken, getToken } from '../lib/api';
 
-// --- TYPES ---
+/* =============================== TYPES =============================== */
 
-export interface UserState {
-  currentUserId: string;
-  name: string;
+export interface UserProfile {
+  id: string;
+  username: string;
+  email: string;
+  fullName: string;
+  address: string;
+  country: string;
+  state: string;
+  city: string;
+  collegeName: string;
+  spendingPreferences: string[];
   monthlyIncome: number;
   savingsMode: 'Conservative' | 'Balanced' | 'Aggressive';
   xp: number;
@@ -13,25 +22,17 @@ export interface UserState {
   xpToNext: number;
   badges: string[];
   autoSmsEnabled: boolean;
-  setProfile: (name: string, income: number, mode: 'Conservative' | 'Balanced' | 'Aggressive') => Promise<void>;
-  setAutoSmsEnabled: (enabled: boolean) => Promise<void>;
-  addXp: (amount: number) => void; // local UI visual indicator, state is fully synced from DB
+  savedByAi: number;
+  isDemo: boolean;
 }
 
 export interface Transaction {
   id: string;
   type: 'income' | 'expense';
-  category: 'Food' | 'Transport' | 'Studies' | 'Entertainment' | 'Subscriptions' | 'Salary' | 'Other';
+  category: string;
   amount: number;
   description: string;
-  timestamp: string;
-  mongoCollection: 'user_transactions';
-}
-
-export interface TransactionsState {
-  transactions: Transaction[];
-  addTransaction: (tx: Omit<Transaction, 'id' | 'timestamp' | 'mongoCollection'>) => Promise<void>;
-  deleteTransaction: (id: string) => Promise<void>;
+  date: string; // ISO
 }
 
 export interface Goal {
@@ -46,422 +47,273 @@ export interface Goal {
   agentMonitoring: boolean;
 }
 
-export interface GoalsState {
-  goals: Goal[];
-  addGoal: (goal: Omit<Goal, 'id'>) => Promise<void>;
-  updateGoalSaved: (id: number, amount: number) => Promise<void>;
-  adjustGoalTimeline: (id: number, days: number) => Promise<void>;
-  updateWeeklyTarget: (id: number, amount: number) => Promise<void>;
-  deleteGoal: (id: number) => Promise<void>;
-}
-
-export interface AgentReasoningStep {
+export interface ReasoningStep {
   step: number;
   description: string;
-  mongoOperation?: string;
 }
 
 export interface ChatMessage {
   id: string;
   sender: 'user' | 'agent';
   text: string;
-  timestamp: string;
-  reasoning?: AgentReasoningStep[];
+  date?: string;
+  reasoning?: ReasoningStep[];
   actionsTaken?: string[];
 }
 
-export interface AgentActivityItem {
+export interface ActivityItem {
   id: string;
-  timestamp: string;
-  category: 'INCOME' | 'EXPENSE' | 'GOALS' | 'ALERT' | 'COMMUNITY' | 'REWARD';
+  category: 'INCOME' | 'EXPENSE' | 'GOALS' | 'ALERT' | 'COMMUNITY' | 'REWARD' | string;
   description: string;
-  mongoOperation: string;
+  date: string;
 }
 
-export interface AgentState {
-  chatHistory: ChatMessage[];
-  isThinking: boolean;
-  activityLog: AgentActivityItem[];
-  currentNotification: { title: string; message: string; subMessage: string; op: string } | null;
-  addChatMessage: (text: string) => Promise<void>;
-  setThinking: (thinking: boolean) => void;
-  addActivityLog: (item: Omit<AgentActivityItem, 'id' | 'timestamp'>) => void;
-  setCurrentNotification: (notif: { title: string; message: string; subMessage: string; op: string } | null) => void;
-  triggerAutoSmsSimulation: () => void;
+export interface AppNotification {
+  id: string;
+  type: 'suggestion' | 'alert' | 'challenge' | 'reward' | 'system' | string;
+  title: string;
+  message: string;
+  emoji: string;
+  read: boolean;
+  date: string;
 }
 
-export interface InsightsState {
-  categoryTotals: {
-    Food: number;
-    Transport: number;
-    Studies: number;
-    Entertainment: number;
-    Subscriptions: number;
-  };
-  weeklyTrend: {
-    week: string;
-    Food: number;
-    Transport: number;
-    Entertainment: number;
-    Studies: number;
-  }[];
-  monthProjection: number;
-  totalSpent: number;
-  budgetRemaining: number;
-  recalculateInsights: (transactions: Transaction[]) => void;
-}
-
-// --- GLOBAL LOAD/REFRESH METHOD ---
-
-export const loadUserData = async (userId: string) => {
-  try {
-    const res = await fetch(`/api/users/${userId}/data`);
-    if (!res.ok) throw new Error(`Failed to load data for user: ${userId}`);
-    const data = await res.json();
-
-    // 1. Sync User Store
-    useUserStore.setState({
-      currentUserId: userId,
-      name: data.user.name,
-      monthlyIncome: data.user.monthlyIncome,
-      savingsMode: data.user.savingsMode,
-      xp: data.user.xp,
-      level: data.user.level,
-      nextLevel: data.user.nextLevel,
-      xpToNext: data.user.xpToNext,
-      badges: data.user.badges,
-      autoSmsEnabled: data.user.autoSmsEnabled
-    });
-
-    // 2. Sync Transactions Store
-    useTransactionsStore.setState({
-      transactions: data.transactions
-    });
-
-    // 3. Sync Goals Store
-    useGoalsStore.setState({
-      goals: data.goals
-    });
-
-    // 4. Sync Agent Store
-    useAgentStore.setState({
-      chatHistory: data.chatHistory,
-      activityLog: data.activityLog
-    });
-
-    // 5. Sync Insights Store
-    useInsightsStore.setState({
-      categoryTotals: data.insights.categoryTotals,
-      totalSpent: data.insights.totalSpent,
-      budgetRemaining: data.insights.budgetRemaining,
-      monthProjection: data.insights.monthProjection
-    });
-
-    console.log(`Zustand stores fully synced with MongoDB for user: ${data.user.name}`);
-  } catch (error) {
-    console.error('Error in loadUserData:', error);
-  }
+const EMPTY_PROFILE: UserProfile = {
+  id: '', username: '', email: '', fullName: '', address: '', country: 'India',
+  state: '', city: '', collegeName: '', spendingPreferences: [],
+  monthlyIncome: 0, savingsMode: 'Balanced', xp: 0, level: 'Rookie Saver',
+  nextLevel: 'Budget Pro', xpToNext: 300, badges: [], autoSmsEnabled: false,
+  savedByAi: 0, isDemo: false,
 };
 
-// --- STORES DEFINITIONS ---
+/* =========================== DATA LOADER =========================== */
+
+export const loadUserData = async () => {
+  const data = await apiFetch('/api/me/data');
+  useUserStore.setState({ profile: mapUser(data.user) });
+  useTransactionsStore.setState({ transactions: data.transactions || [] });
+  useGoalsStore.setState({ goals: data.goals || [] });
+  useAgentStore.setState({
+    chatHistory: data.chatHistory || [],
+    activityLog: data.activityLog || [],
+    notifications: data.notifications || [],
+  });
+  return data;
+};
+
+function mapUser(u: any): UserProfile {
+  return {
+    id: u._id || u.id,
+    username: u.username, email: u.email, fullName: u.fullName || u.name || '',
+    address: u.address || '', country: u.country || 'India', state: u.state || '',
+    city: u.city || '', collegeName: u.collegeName || '',
+    spendingPreferences: u.spendingPreferences || [],
+    monthlyIncome: u.monthlyIncome || 0, savingsMode: u.savingsMode || 'Balanced',
+    xp: u.xp || 0, level: u.level || 'Rookie Saver', nextLevel: u.nextLevel || 'Budget Pro',
+    xpToNext: u.xpToNext || 300, badges: u.badges || [], autoSmsEnabled: !!u.autoSmsEnabled,
+    savedByAi: u.savedByAi || 0, isDemo: !!u.isDemo,
+  };
+}
+
+/* =============================== AUTH =============================== */
+
+interface AuthState {
+  status: 'loading' | 'authed' | 'guest';
+  init: () => Promise<void>;
+  login: (identifier: string, password: string) => Promise<void>;
+  signup: (payload: any) => Promise<void>;
+  demoLogin: (username?: string) => Promise<void>;
+  logout: () => void;
+}
+
+async function afterAuth(token: string) {
+  setToken(token);
+  await loadUserData();
+  useAuthStore.setState({ status: 'authed' });
+}
+
+export const useAuthStore = create<AuthState>((set) => ({
+  status: 'loading',
+
+  init: async () => {
+    if (!getToken()) { set({ status: 'guest' }); return; }
+    try {
+      await loadUserData();
+      set({ status: 'authed' });
+    } catch {
+      setToken(null);
+      set({ status: 'guest' });
+    }
+  },
+
+  login: async (identifier, password) => {
+    const res = await apiFetch('/api/auth/login', { method: 'POST', body: { identifier, password } });
+    await afterAuth(res.token);
+  },
+
+  signup: async (payload) => {
+    const res = await apiFetch('/api/auth/signup', { method: 'POST', body: payload });
+    await afterAuth(res.token);
+  },
+
+  demoLogin: async (username) => {
+    const res = await apiFetch('/api/auth/demo', { method: 'POST', body: { username } });
+    await afterAuth(res.token);
+  },
+
+  logout: () => {
+    setToken(null);
+    useUserStore.setState({ profile: { ...EMPTY_PROFILE } });
+    useTransactionsStore.setState({ transactions: [] });
+    useGoalsStore.setState({ goals: [] });
+    useAgentStore.setState({ chatHistory: [], activityLog: [], notifications: [], currentNotification: null });
+    set({ status: 'guest' });
+  },
+}));
+
+/* ============================ USER PROFILE ============================ */
+
+interface UserState {
+  profile: UserProfile;
+  updateProfile: (updates: Partial<UserProfile>) => Promise<void>;
+}
 
 export const useUserStore = create<UserState>(() => ({
-  currentUserId: 'usr_1', // Default
-  name: 'Arjun',
-  monthlyIncome: 8000,
-  savingsMode: 'Balanced',
-  xp: 340,
-  level: 'Budget Pro',
-  nextLevel: 'Financial Genius',
-  xpToNext: 500,
-  badges: ['First Goal Saved', '7-Day Streak', 'Budget Master'],
-  autoSmsEnabled: false,
+  profile: { ...EMPTY_PROFILE },
 
-  setProfile: async (name, income, mode) => {
-    const userId = useUserStore.getState().currentUserId;
-    try {
-      const res = await fetch(`/api/users/${userId}/profile`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, monthlyIncome: income, savingsMode: mode })
-      });
-      if (!res.ok) throw new Error('Failed to update profile');
-      await loadUserData(userId);
-    } catch (e) {
-      console.error(e);
-    }
+  updateProfile: async (updates) => {
+    const res = await apiFetch('/api/me/profile', { method: 'PATCH', body: updates });
+    useUserStore.setState({ profile: mapUser(res.user) });
   },
-
-  setAutoSmsEnabled: async (enabled) => {
-    const userId = useUserStore.getState().currentUserId;
-    try {
-      const res = await fetch(`/api/users/${userId}/profile`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ autoSmsEnabled: enabled })
-      });
-      if (!res.ok) throw new Error('Failed to toggle auto SMS');
-      await loadUserData(userId);
-    } catch (e) {
-      console.error(e);
-    }
-  },
-
-  addXp: (amount) => set((state) => {
-    const newXp = state.xp + amount;
-    if (newXp >= state.xpToNext) {
-      return {
-        xp: newXp - state.xpToNext,
-        level: 'Financial Genius',
-        nextLevel: 'Wealth Guru',
-        xpToNext: 1000,
-        badges: [...state.badges, 'Consistency King']
-      };
-    }
-    return { xp: newXp };
-  })
 }));
+
+/* ============================ TRANSACTIONS ============================ */
+
+interface TransactionsState {
+  transactions: Transaction[];
+  addTransaction: (tx: Omit<Transaction, 'id' | 'date'>) => Promise<any>;
+  deleteTransaction: (id: string) => Promise<void>;
+}
 
 export const useTransactionsStore = create<TransactionsState>(() => ({
   transactions: [],
-  
+
   addTransaction: async (tx) => {
-    const userId = useUserStore.getState().currentUserId;
-    try {
-      const res = await fetch(`/api/users/${userId}/transactions`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(tx)
-      });
-      if (!res.ok) throw new Error('Failed to log transaction');
-      await loadUserData(userId);
-    } catch (e) {
-      console.error(e);
-    }
+    const res = await apiFetch('/api/me/transactions', { method: 'POST', body: tx });
+    await loadUserData();
+    return res;
   },
 
   deleteTransaction: async (id) => {
-    const userId = useUserStore.getState().currentUserId;
-    try {
-      const res = await fetch(`/api/users/${userId}/transactions/${id}`, {
-        method: 'DELETE'
-      });
-      if (!res.ok) throw new Error('Failed to delete transaction');
-      await loadUserData(userId);
-    } catch (e) {
-      console.error(e);
-    }
-  }
+    await apiFetch(`/api/me/transactions/${id}`, { method: 'DELETE' });
+    await loadUserData();
+  },
 }));
 
-export const useGoalsStore = create<GoalsState>((set) => ({
+/* =============================== GOALS =============================== */
+
+interface GoalsState {
+  goals: Goal[];
+  addGoal: (goal: Omit<Goal, 'id' | 'saved'>) => Promise<void>;
+  updateGoalSaved: (id: number, amount: number) => Promise<void>;
+  updateWeeklyTarget: (id: number, amount: number) => Promise<void>;
+  deleteGoal: (id: number) => Promise<void>;
+}
+
+export const useGoalsStore = create<GoalsState>(() => ({
   goals: [],
-  
+
   addGoal: async (goal) => {
-    const userId = useUserStore.getState().currentUserId;
-    try {
-      const res = await fetch(`/api/users/${userId}/goals`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(goal)
-      });
-      if (!res.ok) throw new Error('Failed to add goal');
-      await loadUserData(userId);
-    } catch (e) {
-      console.error(e);
-    }
+    await apiFetch('/api/me/goals', { method: 'POST', body: goal });
+    await loadUserData();
   },
 
   updateGoalSaved: async (id, amount) => {
-    const userId = useUserStore.getState().currentUserId;
-    // We add to current goal saved
-    const goal = useGoalsStore.getState().goals.find(g => g.id === id);
+    const goal = useGoalsStore.getState().goals.find((g) => g.id === id);
     if (!goal) return;
     const newSaved = Math.min(goal.target, goal.saved + amount);
-
-    try {
-      const res = await fetch(`/api/users/${userId}/goals/${id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ saved: newSaved })
-      });
-      if (!res.ok) throw new Error('Failed to update goal saved pool');
-      await loadUserData(userId);
-    } catch (e) {
-      console.error(e);
-    }
-  },
-
-  adjustGoalTimeline: async (id, days) => {
-    const userId = useUserStore.getState().currentUserId;
-    const goal = useGoalsStore.getState().goals.find(g => g.id === id);
-    if (!goal) return;
-
-    const parts = goal.targetDate.split('-');
-    const dateObj = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
-    dateObj.setDate(dateObj.getDate() + days);
-    const yyyy = dateObj.getFullYear();
-    const mm = String(dateObj.getMonth() + 1).padStart(2, '0');
-    const dd = String(dateObj.getDate()).padStart(2, '0');
-    const targetDate = `${yyyy}-${mm}-${dd}`;
-
-    try {
-      const res = await fetch(`/api/users/${userId}/goals/${id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ targetDate })
-      });
-      if (!res.ok) throw new Error('Failed to adjust timeline');
-      await loadUserData(userId);
-    } catch (e) {
-      console.error(e);
-    }
+    await apiFetch(`/api/me/goals/${id}`, { method: 'PUT', body: { saved: newSaved } });
+    await loadUserData();
   },
 
   updateWeeklyTarget: async (id, amount) => {
-    const userId = useUserStore.getState().currentUserId;
-    try {
-      const res = await fetch(`/api/users/${userId}/goals/${id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ weeklyTarget: amount })
-      });
-      if (!res.ok) throw new Error('Failed to update weekly target');
-      await loadUserData(userId);
-    } catch (e) {
-      console.error(e);
-    }
+    await apiFetch(`/api/me/goals/${id}`, { method: 'PUT', body: { weeklyTarget: amount } });
+    await loadUserData();
   },
 
   deleteGoal: async (id) => {
-    const userId = useUserStore.getState().currentUserId;
-    try {
-      const res = await fetch(`/api/users/${userId}/goals/${id}`, {
-        method: 'DELETE'
-      });
-      if (!res.ok) throw new Error('Failed to delete goal');
-      await loadUserData(userId);
-    } catch (e) {
-      console.error(e);
-    }
-  }
+    await apiFetch(`/api/me/goals/${id}`, { method: 'DELETE' });
+    await loadUserData();
+  },
 }));
+
+/* =============================== AGENT =============================== */
+
+interface ToastNotification {
+  title: string;
+  message: string;
+  subMessage?: string;
+  emoji?: string;
+}
+
+interface AgentState {
+  chatHistory: ChatMessage[];
+  isThinking: boolean;
+  activityLog: ActivityItem[];
+  notifications: AppNotification[];
+  currentNotification: ToastNotification | null;
+  addChatMessage: (text: string) => Promise<void>;
+  deleteChat: () => Promise<void>;
+  addActivityLog: (item: Omit<ActivityItem, 'id' | 'date'>) => void;
+  markNotificationsRead: () => Promise<void>;
+  deleteNotification: (id: string) => Promise<void>;
+  setCurrentNotification: (n: ToastNotification | null) => void;
+}
 
 export const useAgentStore = create<AgentState>((set) => ({
   chatHistory: [],
   isThinking: false,
   activityLog: [],
+  notifications: [],
   currentNotification: null,
 
   addChatMessage: async (text) => {
-    const userId = useUserStore.getState().currentUserId;
-    
-    // Add user message locally first for instant feedback
-    const userMsg: ChatMessage = {
-      id: `msg-user-temp-${Date.now()}`,
-      sender: 'user',
-      text,
-      timestamp: 'Just now'
-    };
-    set((state) => ({ 
-      chatHistory: [...state.chatHistory, userMsg],
-      isThinking: true 
-    }));
-
+    const optimistic: ChatMessage = { id: `tmp-${Date.now()}`, sender: 'user', text, date: new Date().toISOString() };
+    set((s) => ({ chatHistory: [...s.chatHistory, optimistic], isThinking: true }));
     try {
-      const res = await fetch(`/api/users/${userId}/chat`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: text })
-      });
-      if (!res.ok) throw new Error('Failed to get agent response');
-      await res.json();
-      
-      // Sync all user data to capture CRUD side effects from agent
-      await loadUserData(userId);
+      await apiFetch('/api/me/chat', { method: 'POST', body: { message: text } });
+      await loadUserData();
     } catch (e) {
-      console.error(e);
-      // fallback in case of errors
-      set((state) => ({ 
-        chatHistory: [
-          ...state.chatHistory, 
-          {
-            id: `msg-err-${Date.now()}`,
-            sender: 'agent',
-            text: 'I apologize, but I encountered an error communicating with my intelligence server. Please ensure the backend is running.',
-            timestamp: 'Just now'
-          }
-        ],
-        isThinking: false 
+      set((s) => ({
+        chatHistory: [...s.chatHistory, {
+          id: `err-${Date.now()}`, sender: 'agent',
+          text: 'Sorry — I had trouble reaching my brain just now. Make sure the backend is running and try again.',
+          date: new Date().toISOString(),
+        }],
       }));
     } finally {
       set({ isThinking: false });
     }
   },
 
-  setThinking: (thinking) => set({ isThinking: thinking }),
-  
-  addActivityLog: (item) => set((state) => {
-    const newItem: AgentActivityItem = {
-      ...item,
-      id: `act-${Date.now()}`,
-      timestamp: 'Just now'
-    };
-    return { activityLog: [newItem, ...state.activityLog] };
-  }),
+  deleteChat: async () => {
+    await apiFetch('/api/me/chat', { method: 'DELETE' });
+    set({ chatHistory: [] });
+  },
 
-  setCurrentNotification: (notif) => set({ currentNotification: notif }),
+  addActivityLog: (item) => set((s) => ({
+    activityLog: [{ ...item, id: `act-${Date.now()}`, date: new Date().toISOString() }, ...s.activityLog],
+  })),
 
-  triggerAutoSmsSimulation: () => {
-    const userId = useUserStore.getState().currentUserId;
-    console.log('Simulating Auto SMS in 30 seconds...');
-    
-    setTimeout(async () => {
-      try {
-        // 1. Add Zomato transaction via API
-        const res = await fetch(`/api/users/${userId}/transactions`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            type: 'expense',
-            category: 'Food',
-            amount: 340,
-            description: 'Zomato debited via UPI (Auto SMS Simulation)'
-          })
-        });
-        if (!res.ok) throw new Error('Auto SMS transaction insert failed');
+  markNotificationsRead: async () => {
+    set((s) => ({ notifications: s.notifications.map((n) => ({ ...n, read: true })) }));
+    try { await apiFetch('/api/me/notifications/read', { method: 'POST', body: {} }); } catch {}
+  },
 
-        // 2. Reload user data
-        await loadUserData(userId);
+  deleteNotification: async (id) => {
+    set((s) => ({ notifications: s.notifications.filter((n) => n.id !== id) }));
+    try { await apiFetch(`/api/me/notifications/${id}`, { method: 'DELETE' }); } catch {}
+  },
 
-        // 3. Trigger notification in UI
-        useAgentStore.getState().setCurrentNotification({
-          title: 'Transaction Detected',
-          message: '🔔 Transaction detected: ₹340 debited via UPI (Zomato)',
-          subMessage: "I've categorized this as Food and updated your budget automatically in MongoDB.",
-          op: '→ MongoDB Atlas MCP: db.transactions.insertOne()'
-        });
-      } catch (err) {
-        console.error('Auto SMS simulation failed:', err);
-      }
-    }, 30000);
-  }
-}));
-
-export const useInsightsStore = create<InsightsState>(() => ({
-  categoryTotals: { Food: 0, Transport: 0, Studies: 0, Entertainment: 0, Subscriptions: 0 },
-  weeklyTrend: [
-    { week: 'Week 1', Food: 900, Transport: 300, Entertainment: 400, Studies: 500 },
-    { week: 'Week 2', Food: 1050, Transport: 250, Entertainment: 600, Studies: 200 },
-    { week: 'Week 3', Food: 800, Transport: 380, Entertainment: 200, Studies: 800 },
-    { week: 'Week 4', Food: 1200, Transport: 400, Entertainment: 840, Studies: 800 },
-  ],
-  monthProjection: 0,
-  totalSpent: 0,
-  budgetRemaining: 0,
-
-  recalculateInsights: () => {
-    // Backend handles the recalculation on the fly and returns it in user data load.
-    // This local trigger is kept for interface compatibility.
-  }
+  setCurrentNotification: (n) => set({ currentNotification: n }),
 }));
