@@ -1,0 +1,30 @@
+# FinAgent Money Management - Project Requirements
+
+## Runtime Environment
+- Node.js >= 18.0.0 (Recommended: v20.x or newer)
+- npm >= 9.0.0
+
+## Database Requirements
+- MongoDB Atlas Cluster (or a local MongoDB instance running on port 27017)
+- Fallback support: Local JSON file-based database emulator (db.json)
+
+## API / LLM Keys
+- Gemini API Key (from Google AI Studio)
+- Optional fallback: Hugging Face API Key (HF_API_KEY)
+
+## Frontend Dependencies (Vite + React)
+- react >= 18.3.1
+- react-dom >= 18.3.1
+- react-router-dom >= 6.22.3
+- recharts >= 2.12.3
+- zustand >= 4.5.2
+- lucide-react >= 0.363.0
+- tailwindcss >= 3.4.1
+
+## Backend Dependencies (Express Server)
+- express >= 4.19.2
+- cors >= 2.8.5
+- dotenv >= 16.4.5
+- mongodb >= 6.5.0
+- @google/generative-ai >= 0.11.0
+- nodemon >= 3.1.0 (devDependency)
