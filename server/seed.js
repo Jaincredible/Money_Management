@@ -1,5 +1,6 @@
 import { connectDb, getDb } from './db.js';
 import { hashPassword } from './auth.js';
+import { pathToFileURL } from 'url';
 import dotenv from 'dotenv';
 
 dotenv.config();
@@ -35,59 +36,81 @@ const iso = (daysAgo, hour = 12) => {
   return d.toISOString();
 };
 
-// Category -> [minAmt, maxAmt, [descriptions]]
+// Category -> relative spend size (base) + merchants -> item examples (for drill-downs)
 const CAT = {
-  Food: [70, 420, ['Canteen lunch', 'Zomato dinner', 'Chai & samosa', 'Swiggy late-night', 'Cafe with friends']],
-  Groceries: [200, 1300, ['Weekly groceries', 'Milk & eggs run', 'Instamart order', 'Snacks restock']],
-  Transport: [30, 340, ['Uber to campus', 'Metro card recharge', 'Auto fare', 'Ola ride', 'Bus pass']],
-  Travel: [900, 6500, ['Train ticket home', 'Weekend trip bus', 'Flight booking advance', 'Hostel booking']],
-  Studies: [150, 2400, ['Reference textbook', 'Stationery', 'Online course', 'Lab manual', 'Printout & binding']],
-  Entertainment: [150, 1200, ['Movie tickets', 'Concert pass', 'Gaming top-up', 'Bowling night']],
-  Sports: [300, 2500, ['Football turf booking', 'Cricket kit', 'Badminton court', 'Sports shoes']],
-  Shopping: [400, 3500, ['New hoodie', 'Sneakers', 'Headphones', 'Backpack']],
-  Subscriptions: [99, 799, ['Spotify Premium', 'Netflix Mobile', 'YouTube Premium', 'iCloud storage']],
-  Fitness: [500, 2200, ['Gym monthly fee', 'Protein supplement', 'Yoga class', 'Cycling gear']]
+  Food:          { base: 0.8, m: { Swiggy: ['Chicken burger', 'Paneer wrap', 'Veg biryani', 'Pizza'], Zomato: ['Butter chicken', 'Momos', 'Pasta', 'Thali'], 'Campus Canteen': ['Lunch combo', 'Samosa & chai', 'Sandwich', 'Dosa'], Chaayos: ['Masala chai', 'Cold coffee', 'Maggi'] } },
+  Groceries:     { base: 1.0, m: { Blinkit: ['Milk & eggs', 'Snacks', 'Fruits'], Zepto: ['Instant noodles', 'Curd', 'Bread'], BigBasket: ['Weekly staples', 'Detergent', 'Rice'], DMart: ['Monthly stock-up'] } },
+  Transport:     { base: 0.5, m: { Uber: ['Ride to campus', 'Airport drop'], Ola: ['Auto ride', 'Outstation'], Rapido: ['Bike taxi'], Metro: ['Smart-card recharge'] } },
+  Travel:        { base: 3.0, m: { IRCTC: ['Train ticket home', 'Tatkal booking'], MakeMyTrip: ['Flight advance', 'Hotel booking'], RedBus: ['Weekend bus'], Ixigo: ['Return ticket'] } },
+  Studies:       { base: 1.2, m: { Amazon: ['Reference textbook', 'Notebooks'], Flipkart: ['Calculator', 'Drafter'], Udemy: ['DSA course', 'Design course'], 'Xerox Point': ['Notes printout', 'Binding'] } },
+  Entertainment: { base: 0.9, m: { BookMyShow: ['Movie tickets', 'Comedy show'], PVR: ['Popcorn combo'], Steam: ['Game top-up', 'DLC'], Zomato: ['Party snacks'] } },
+  Sports:        { base: 1.3, m: { Decathlon: ['Football', 'Jersey', 'Water bottle'], Playo: ['Turf booking'], 'Turf Arena': ['Cricket net'], Nike: ['Running shoes'] } },
+  Shopping:      { base: 1.6, m: { Amazon: ['Headphones', 'Phone case', 'Charger'], Myntra: ['Hoodie', 'Sneakers', 'T-shirt'], Flipkart: ['Backpack', 'Watch'], Ajio: ['Jeans'] } },
+  Subscriptions: { base: 0.4, m: { Spotify: ['Student Premium'], Netflix: ['Mobile plan'], YouTube: ['Premium'], 'Amazon Prime': ['Membership'] } },
+  Fitness:       { base: 1.1, m: { 'Cult.fit': ['Monthly pass', 'Yoga class'], HealthKart: ['Whey protein', 'Vitamins'], "Gold's Gym": ['Monthly fee'] } }
 };
 
 function makeTransactions(userId, income, prefs) {
   const txs = [];
-  const add = (type, category, amount, description, daysAgo, hour) => txs.push({
-    id: `tx-${userId}-${txs.length + 1}`, userId, type, category, amount, description, date: iso(daysAgo, hour)
+  let n = 0;
+  const add = (type, category, merchant, description, amount, daysAgo, hour) => txs.push({
+    id: `tx-${userId}-${++n}`, userId, type, category, merchant, description, amount, date: iso(daysAgo, hour)
   });
 
-  // 3 months of stipend (this month + previous two)
-  add('income', 'Salary', income, 'Monthly stipend / allowance', 2, 10);
-  add('income', 'Salary', income, 'Monthly stipend / allowance', 34, 10);
-  add('income', 'Salary', income, 'Monthly stipend / allowance', 64, 10);
-  add('income', 'Freelance', rand(500, 2500), 'Freelance design gig', 9, 15);
+  // Income: 3 monthly stipends + a freelance gig
+  const freelance = rand(600, 2600);
+  add('income', 'Salary', 'Stipend', 'Monthly stipend / allowance', income, 2, 10);
+  add('income', 'Salary', 'Stipend', 'Monthly stipend / allowance', income, 34, 10);
+  add('income', 'Salary', 'Stipend', 'Monthly stipend / allowance', income, 64, 10);
+  add('income', 'Freelance', 'Upwork', 'Freelance design gig', freelance, 9, 15);
+  const totalIncome = income * 3 + freelance;
 
-  // Bias categories toward the user's preferences so spending looks preference-driven.
-  const catPool = [...prefs, ...prefs, 'Food', 'Transport', 'Studies', 'Subscriptions', 'Groceries'];
-  const spend = (daysAgo) => {
-    const cat = pick(catPool);
-    const [lo, hi, descs] = CAT[cat] || CAT.Food;
-    add('expense', cat, rand(lo, hi), pick(descs), daysAgo, rand(8, 22));
-  };
+  // Fixed subscriptions (part of monthly spend)
+  const subs = [
+    { cat: 'Subscriptions', m: 'Spotify', item: 'Student Premium', day: 5, amount: 119 },
+    { cat: 'Subscriptions', m: 'Netflix', item: 'Mobile plan', day: 8, amount: 199 }
+  ];
+  const subTotal = subs.reduce((s, x) => s + x.amount, 0);
 
-  // Today (0) and this week (1-6): the "Today" / recent buckets
-  spend(0); spend(0);
-  for (const d of [1, 2, 3, 4, 5, 6]) spend(d);
-  // Rest of this month (7-11 — today is the 12th)
-  for (const d of [7, 8, 10, 11]) spend(d);
-  // Earlier this year (previous months)
-  for (const d of [20, 27, 33, 40, 48, 61, 75, 96]) spend(d);
-  // Fixed subscriptions this month for realism
-  add('expense', 'Subscriptions', 119, 'Spotify Premium', 5, 9);
-  add('expense', 'Subscriptions', 199, 'Netflix Mobile', 8, 9);
+  // Variable expense slots across ~3 months, biased toward the user's preferences
+  const days = [0, 0, 1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 18, 25, 33, 41, 52, 63, 78, 96];
+  const pool = [...prefs, ...prefs, 'Food', 'Transport', 'Studies', 'Groceries'].filter((c) => CAT[c]);
+  const slots = days.map((day) => {
+    const cat = pick(pool);
+    const merchant = pick(Object.keys(CAT[cat].m));
+    const item = pick(CAT[cat].m[merchant]);
+    return { cat, merchant, item, day, weight: CAT[cat].base * (0.55 + Math.random() * 0.9) };
+  });
+
+  // Scale variable spend so TOTAL expenses = 50–63% of income → always a healthy positive balance.
+  const spendTarget = Math.round(totalIncome * (0.5 + Math.random() * 0.13));
+  const variableTarget = Math.max(1500, spendTarget - subTotal);
+  const wsum = slots.reduce((s, x) => s + x.weight, 0) || 1;
+  slots.forEach((s) => { s.amount = Math.max(40, Math.round((variableTarget * s.weight / wsum) / 10) * 10); });
+
+  slots.forEach((s) => add('expense', s.cat, s.merchant, s.item, s.amount, s.day, rand(8, 22)));
+  subs.forEach((s) => add('expense', s.cat, s.m, s.item, s.amount, s.day, 9));
+
+  // A recent split-with-friends expense (you only carry your share)
+  const splitTotal = rand(900, 1800);
+  const yourShare = Math.round(splitTotal / 3);
+  add('expense', 'Food', 'Zomato', 'Group dinner (split 3 ways)', yourShare, 3, 21);
+  txs[txs.length - 1].split = { total: splitTotal, friends: ['Priya', 'Rahul'], people: 3, yourShare, collecting: splitTotal - yourShare };
 
   return txs;
 }
 
 function makeGoals(userId, income) {
+  // Goa Trip is a shared "Jar" — friends chip in too.
+  const goaSaved = rand(4000, 9000);
+  const friends = [
+    { name: 'Priya', contributed: rand(500, 2500) },
+    { name: 'Rahul', contributed: rand(500, 2000) }
+  ];
   return [
-    { id: 1, userId, name: 'Goa Trip', emoji: '🏖️', target: 15000, saved: rand(4000, 9000), weeklyTarget: 1500, startDate: iso(70).split('T')[0], targetDate: '2026-09-15', agentMonitoring: true },
-    { id: 2, userId, name: 'New Laptop', emoji: '💻', target: 55000, saved: rand(8000, 20000), weeklyTarget: 2000, startDate: iso(90).split('T')[0], targetDate: '2026-12-20', agentMonitoring: true },
-    { id: 3, userId, name: 'Emergency Fund', emoji: '🛡️', target: 10000, saved: rand(3000, 8000), weeklyTarget: 800, startDate: iso(120).split('T')[0], targetDate: '2026-10-01', agentMonitoring: true }
+    { id: 1, userId, name: 'Goa Trip', emoji: '🏖️', target: 15000, saved: goaSaved, weeklyTarget: 1500, startDate: iso(70).split('T')[0], targetDate: '2026-09-15', agentMonitoring: true, shared: true, members: friends },
+    { id: 2, userId, name: 'New Laptop', emoji: '💻', target: 55000, saved: rand(8000, 20000), weeklyTarget: 2000, startDate: iso(90).split('T')[0], targetDate: '2026-12-20', agentMonitoring: true, shared: false, members: [] },
+    { id: 3, userId, name: 'Emergency Fund', emoji: '🛡️', target: 10000, saved: rand(3000, 8000), weeklyTarget: 800, startDate: iso(120).split('T')[0], targetDate: '2026-10-01', agentMonitoring: true, shared: false, members: [] }
   ];
 }
 
@@ -96,7 +119,8 @@ function makeNotifications(userId, name) {
     { id: `ntf-${userId}-1`, userId, type: 'challenge', emoji: '🔥', title: 'Challenge invitation', message: `You've been invited to the "July No-Spend Weekend" challenge. Tap to join!`, read: false, date: iso(0, 9) },
     { id: `ntf-${userId}-2`, userId, type: 'suggestion', emoji: '🤖', title: 'Agent suggestion', message: `You're spending a bit fast on Food this week. Shift ₹300 to your Goa Trip and you'll still be comfortable.`, read: false, date: iso(0, 8) },
     { id: `ntf-${userId}-3`, userId, type: 'alert', emoji: '⚠️', title: 'Budget alert', message: `Subscriptions hit 80% of your monthly cap. Netflix + Spotify = ₹318.`, read: true, date: iso(2, 20) },
-    { id: `ntf-${userId}-4`, userId, type: 'reward', emoji: '🏆', title: 'Badge unlocked', message: `Nice! You earned the "Budget Master" badge for staying under budget 7 days straight.`, read: true, date: iso(4, 18) }
+    { id: `ntf-${userId}-4`, userId, type: 'reward', emoji: '🏆', title: 'Badge unlocked', message: `Nice! You earned the "Budget Master" badge for staying under budget 7 days straight.`, read: true, date: iso(4, 18) },
+    { id: `ntf-${userId}-5`, userId, type: 'alert', emoji: '📅', title: 'Bill due soon', message: `Your Netflix Mobile plan (₹199) renews in 2 days. I've set aside enough to cover it.`, read: false, date: iso(0, 7) }
   ];
 }
 
@@ -123,7 +147,7 @@ export async function seedDatabase() {
   const passwordHash = await hashPassword(DEMO_PASSWORD);
 
   console.log('Clearing existing collections...');
-  for (const c of ['users', 'transactions', 'goals', 'chats', 'activity_logs', 'notifications']) {
+  for (const c of ['users', 'transactions', 'goals', 'chats', 'activity_logs', 'notifications', 'suggestions']) {
     await db.collection(c).deleteMany({});
   }
 
@@ -148,7 +172,12 @@ export async function seedDatabase() {
       monthlyIncome: p.income,
       savingsMode: p.mode,
       xp, ...lv,
-      autoSmsEnabled: Math.random() > 0.5,
+      autoSmsEnabled: p.featured || Math.random() > 0.5,
+      messageAccess: p.featured || Math.random() > 0.5,
+      agentPersona: p.featured ? 'Coach' : pick(['Coach', 'Hype', 'Chill']),
+      roundUpEnabled: true,
+      roundUpTo: 10,
+      roundUpPot: rand(120, 520),
       chatSummary: '',
       savedByAi: rand(1500, 6000),
       isDemo: true,
@@ -172,8 +201,8 @@ export async function seedDatabase() {
   console.log(`Seeded ${users.length} demo accounts (login: any username above / password "${DEMO_PASSWORD}"). Featured demo: arjun.`);
 }
 
-// Run directly: `node seed.js`
-if (import.meta.url === `file://${process.argv[1]}`.replace(/\\/g, '/')) {
+// Run directly: `node seed.js` (cross-platform entry check)
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   (async () => {
     try { await seedDatabase(); process.exit(0); }
     catch (e) { console.error('Seeding failed:', e); process.exit(1); }

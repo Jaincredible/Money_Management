@@ -3,7 +3,8 @@ import { getDb } from './db.js';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import {
   distributeIncomeToGoals, logActivity, pushNotification,
-  EXPENSE_CATEGORIES, INCOME_CATEGORIES, savingsRateForMode
+  EXPENSE_CATEGORIES, INCOME_CATEGORIES, savingsRateForMode,
+  deriveMerchant, checkBudgetAlert, generateSuggestions
 } from './heuristics.js';
 
 dotenv.config();
@@ -134,6 +135,18 @@ HOW YOU WORK:
 - Gamification: users earn XP for logging (+15), goals (+25), saving to a goal (+20). Mention XP when earned.
 - Use get_current_datetime for anything time-related; never guess today's date.`;
 
+function personaTone(persona) {
+  switch (persona) {
+    case 'Hype':
+      return 'TONE: You are HYPE — high-energy, playful, lots of emojis, hype the user up like a best friend celebrating every win and gently roasting bad spends. Keep it fun.';
+    case 'Chill':
+      return 'TONE: You are CHILL — calm, minimal, no fluff. Short, plain, reassuring sentences. Few or no emojis.';
+    case 'Coach':
+    default:
+      return 'TONE: You are a supportive COACH — warm, motivating, practical. Encourage good habits and explain the "why" briefly.';
+  }
+}
+
 // --- XP helper ---
 async function addXp(db, userId, amount) {
   const user = await db.collection('users').findOne({ _id: userId });
@@ -226,20 +239,21 @@ async function executeTool(db, userId, call, reasoningSteps, actionsTaken) {
 
     case 'add_transaction': {
       const { type, category, amount, description } = args;
+      const cat = ALL_CATEGORIES.includes(category) ? category : 'Other';
       const newTx = {
         id: `tx-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-        userId, type,
-        category: ALL_CATEGORIES.includes(category) ? category : 'Other',
+        userId, type, category: cat,
+        merchant: deriveMerchant(description, cat),
         amount, description,
         date: new Date().toISOString()
       };
-      step(`Logged a ₹${amount} ${type} for "${description}" under ${newTx.category}`);
+      step(`Logged a ₹${amount} ${type} for "${description}" under ${cat}`);
       await db.collection('transactions').insertOne(newTx);
       await addXp(db, userId, 15);
-      actionsTaken.push(`Logged ₹${amount} under ${newTx.category} (+15 XP)`);
+      actionsTaken.push(`Logged ₹${amount} under ${cat} (+15 XP)`);
       await logActivity(db, userId, {
         category: type === 'income' ? 'INCOME' : 'EXPENSE',
-        description: `${type === 'income' ? 'Income' : 'Expense'} of ₹${Number(amount).toLocaleString('en-IN')} — ${description} (${newTx.category})`
+        description: `${type === 'income' ? 'Income' : 'Expense'} of ₹${Number(amount).toLocaleString('en-IN')} — ${description} (${cat})`
       });
 
       let allocation = null;
@@ -249,6 +263,8 @@ async function executeTool(db, userId, call, reasoningSteps, actionsTaken) {
           step(`Set aside ₹${allocation.pool} into goals (${allocation.savingsMode} plan)`);
           actionsTaken.push(`Auto-saved ₹${allocation.pool} to goals`);
         }
+      } else {
+        await checkBudgetAlert(db, userId, cat);
       }
       return { success: true, transactionId: newTx.id, allocation };
     }
@@ -361,7 +377,7 @@ export async function runAgentChat(userId, userMessage) {
   const contextPack = await buildContextPack(db, user);
   const model = genAI.getGenerativeModel({
     model: MODEL,
-    systemInstruction: systemInstruction + '\n' + contextPack
+    systemInstruction: `${systemInstruction}\n${personaTone(user.agentPersona)}\n${contextPack}`
   });
 
   const contents = history.map(m => ({
@@ -413,6 +429,52 @@ export async function runAgentChat(userId, userMessage) {
   }
 
   return { id: agentMsgId, sender: 'agent', text: finalResponseText, date: now, reasoning: reasoningSteps, actionsTaken };
+}
+
+// --- On-demand contextual suggestion (throttled by the caller to every 6h) ---
+// context: 'home' | 'insights' | a category name (e.g. 'Food')
+export async function generateSuggestionText(userId, context = 'home') {
+  const db = getDb();
+  const user = await db.collection('users').findOne({ _id: userId });
+  if (!user) return 'Add a few transactions and I’ll start coaching your budget.';
+  const [txs, goals] = await Promise.all([
+    db.collection('transactions').find({ userId }).toArray(),
+    db.collection('goals').find({ userId }).toArray()
+  ]);
+
+  const now = new Date();
+  const expenses = txs.filter((t) => t.type === 'expense');
+  const monthExp = expenses.filter((t) => { const d = new Date(t.date); return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth(); });
+  const byCat = {};
+  monthExp.forEach((e) => { byCat[e.category] = (byCat[e.category] || 0) + e.amount; });
+  const income = txs.filter((t) => t.type === 'income').reduce((s, t) => s + t.amount, 0);
+  const spent = expenses.reduce((s, t) => s + t.amount, 0);
+
+  const isCategory = !['home', 'insights'].includes(context);
+  const catTxs = isCategory ? monthExp.filter((t) => t.category === context) : [];
+  const byMerchant = {};
+  catTxs.forEach((t) => { byMerchant[t.merchant || 'Other'] = (byMerchant[t.merchant || 'Other'] || 0) + t.amount; });
+
+  const focus = isCategory
+    ? `Focus ONLY on the "${context}" category this month: ₹${catTxs.reduce((s, t) => s + t.amount, 0)} across ${catTxs.length} orders. By merchant: ${Object.entries(byMerchant).map(([m, v]) => `${m} ₹${v}`).join(', ') || 'none'}.`
+    : `Overall picture. This month by category: ${Object.entries(byCat).map(([c, v]) => `${c} ₹${v}`).join(', ') || 'nothing yet'}.`;
+
+  const prompt = `You are FinAgent, a friendly student money coach. Give ONE short, specific, actionable suggestion (max 32 words, no preamble, no markdown). Use the numbers. Be encouraging.
+User: ${user.fullName || user.username}, ${user.savingsMode} saver (${Math.round(savingsRateForMode(user.savingsMode) * 100)}% target). Likes: ${(user.spendingPreferences || []).join(', ') || 'n/a'}.
+Monthly income ~₹${user.monthlyIncome}. All-time balance ₹${income - spent}.
+${focus}
+Goals: ${goals.map((g) => `${g.name} ₹${g.saved}/₹${g.target}`).join('; ') || 'none'}.`;
+
+  try {
+    const model = genAI.getGenerativeModel({ model: MODEL });
+    const result = await model.generateContent({ contents: [{ role: 'user', parts: [{ text: prompt }] }] });
+    const text = result.response.text();
+    if (text && text.trim()) return text.trim();
+  } catch (e) {
+    console.warn('Suggestion generation fell back to heuristic:', e.message);
+  }
+  const list = generateSuggestions(user, txs, goals);
+  return list[0] || 'You’re doing great — keep logging and I’ll spot ways to save.';
 }
 
 // --- Rolling memory summary for long conversations ---

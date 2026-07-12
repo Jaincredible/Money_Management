@@ -1,8 +1,10 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
-import { AlertCircle } from 'lucide-react';
-import { useTransactionsStore, useGoalsStore, useUserStore } from '../stores/useFinanceStore';
+import { AlertCircle, Sparkles, Loader2, Repeat } from 'lucide-react';
+import { useTransactionsStore, useGoalsStore, useUserStore, fetchSuggestion } from '../stores/useFinanceStore';
 import { PERIODS, type Period, inPeriod, savingsRate, catMeta, inr } from '../lib/constants';
+import CategoryDetail from '../components/CategoryDetail';
+import SpendingHeatmap from '../components/SpendingHeatmap';
 
 export default function Insights() {
   const { transactions } = useTransactionsStore();
@@ -10,6 +12,20 @@ export default function Insights() {
   const { profile } = useUserStore();
   const [period, setPeriod] = useState<Period>('month');
   const [filter, setFilter] = useState<string>('All');
+  const [detailCategory, setDetailCategory] = useState<string | null>(null);
+  const [tip, setTip] = useState('');
+  const [tipLoading, setTipLoading] = useState(true);
+
+  useEffect(() => { fetchSuggestion('insights').then((s) => { setTip(s); setTipLoading(false); }); }, []);
+
+  // Recurring subscriptions (grouped by merchant)
+  const subscriptions = useMemo(() => {
+    const map: Record<string, number> = {};
+    transactions.filter((t) => t.type === 'expense' && t.category === 'Subscriptions' && inPeriod(t.date, 'month'))
+      .forEach((t) => { map[t.merchant || 'Other'] = (map[t.merchant || 'Other'] || 0) + t.amount; });
+    const items = Object.entries(map).map(([name, amount]) => ({ name, amount })).sort((a, b) => b.amount - a.amount);
+    return { items, total: items.reduce((s, i) => s + i.amount, 0) };
+  }, [transactions]);
 
   // Category totals for the selected period
   const { pieData, totalSpent } = useMemo(() => {
@@ -96,6 +112,17 @@ export default function Insights() {
           </div>
         </div>
 
+        {/* Throttled AI suggestion */}
+        <div className="rounded-2xl border border-indigo-500/25 bg-indigo-600/10 p-3.5 flex gap-2.5">
+          <div className="w-8 h-8 rounded-full bg-indigo-500/15 border border-indigo-500/25 flex items-center justify-center text-indigo-300 shrink-0"><Sparkles size={15} /></div>
+          <div className="min-w-0">
+            <p className="text-[10px] font-bold text-indigo-300 uppercase tracking-wider">Agent tip</p>
+            {tipLoading
+              ? <p className="text-xs text-slate-400 flex items-center gap-1.5 mt-0.5"><Loader2 size={12} className="animate-spin" /> Reviewing your spending…</p>
+              : <p className="text-xs text-slate-200 leading-relaxed mt-0.5">{tip}</p>}
+          </div>
+        </div>
+
         {/* Trend */}
         <div className="glass-card rounded-2xl p-4">
           <h2 className="text-sm font-bold text-slate-200 uppercase tracking-wide mb-2">Spending Trend (6 weeks)</h2>
@@ -120,6 +147,9 @@ export default function Insights() {
           </div>
         </div>
 
+        {/* Spending calendar heatmap */}
+        <SpendingHeatmap />
+
         {/* Donut */}
         <div className="glass-card rounded-2xl p-4">
           <h2 className="text-sm font-bold text-slate-200 uppercase tracking-wide mb-2">Category Breakdown</h2>
@@ -142,18 +172,40 @@ export default function Insights() {
               </div>
               <div className="grid grid-cols-2 gap-3 mt-2 border-t border-white/5 pt-4">
                 {pieData.map((item) => (
-                  <div key={item.name} className="flex items-center gap-2">
+                  <button key={item.name} onClick={() => setDetailCategory(item.name)} className="flex items-center gap-2 text-left rounded-lg p-1 -m-1 hover:bg-white/5 transition-colors">
                     <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: item.color }} />
                     <div className="leading-none">
                       <p className="text-xs font-bold text-slate-200">{item.name}</p>
                       <p className="text-[10px] text-slate-400 font-mono mt-1">{inr(item.value)} <span className="text-slate-600">({item.pct}%)</span></p>
                     </div>
-                  </div>
+                  </button>
                 ))}
               </div>
             </>
           )}
         </div>
+
+        {/* Subscriptions */}
+        {subscriptions.items.length > 0 && (
+          <div className="glass-card rounded-2xl p-4">
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-sm font-bold text-slate-200 uppercase tracking-wide flex items-center gap-1.5"><Repeat size={13} className="text-violet-400" /> Subscriptions</h2>
+              <span className="text-xs font-bold text-violet-300">{inr(subscriptions.total)}/mo</span>
+            </div>
+            <div className="space-y-2">
+              {subscriptions.items.map((s) => (
+                <div key={s.name} className="flex items-center justify-between bg-slate-950/50 border border-white/5 rounded-xl p-2.5">
+                  <div className="flex items-center gap-2">
+                    <span className="w-7 h-7 rounded-lg bg-violet-500/10 text-violet-300 text-[9px] font-bold flex items-center justify-center">{s.name.slice(0, 2).toUpperCase()}</span>
+                    <span className="text-xs font-semibold text-slate-200">{s.name}</span>
+                  </div>
+                  <span className="text-xs font-mono text-slate-300">{inr(s.amount)}</span>
+                </div>
+              ))}
+            </div>
+            <p className="text-[10px] text-slate-500 mt-2.5">That's about {inr(subscriptions.total * 12)}/year — ask the agent to pause any you don't use.</p>
+          </div>
+        )}
 
         {/* Goal progress */}
         {goals.length > 0 && (
@@ -223,6 +275,7 @@ export default function Insights() {
           </div>
         </div>
       </div>
+      <CategoryDetail category={detailCategory} period={period} onClose={() => setDetailCategory(null)} />
     </div>
   );
 }

@@ -22,17 +22,37 @@ export interface UserProfile {
   xpToNext: number;
   badges: string[];
   autoSmsEnabled: boolean;
+  messageAccess: boolean;
+  agentPersona: 'Coach' | 'Hype' | 'Chill';
+  roundUpEnabled: boolean;
+  roundUpTo: number;
+  roundUpPot: number;
   savedByAi: number;
   isDemo: boolean;
+}
+
+export interface JarMember {
+  name: string;
+  contributed: number;
+}
+
+export interface SplitInfo {
+  total: number;
+  friends: string[];
+  people: number;
+  yourShare: number;
+  collecting: number;
 }
 
 export interface Transaction {
   id: string;
   type: 'income' | 'expense';
   category: string;
+  merchant?: string;
   amount: number;
   description: string;
   date: string; // ISO
+  split?: SplitInfo;
 }
 
 export interface Goal {
@@ -45,6 +65,8 @@ export interface Goal {
   startDate: string;
   targetDate: string;
   agentMonitoring: boolean;
+  shared?: boolean;
+  members?: JarMember[];
 }
 
 export interface ReasoningStep {
@@ -83,8 +105,19 @@ const EMPTY_PROFILE: UserProfile = {
   state: '', city: '', collegeName: '', spendingPreferences: [],
   monthlyIncome: 0, savingsMode: 'Balanced', xp: 0, level: 'Rookie Saver',
   nextLevel: 'Budget Pro', xpToNext: 300, badges: [], autoSmsEnabled: false,
-  savedByAi: 0, isDemo: false,
+  messageAccess: false, agentPersona: 'Coach', roundUpEnabled: false, roundUpTo: 10,
+  roundUpPot: 0, savedByAi: 0, isDemo: false,
 };
+
+// Fetch the (6h-throttled) AI suggestion for a section/category.
+export async function fetchSuggestion(context: string): Promise<string> {
+  try {
+    const res = await apiFetch(`/api/me/suggestion/${encodeURIComponent(context)}`);
+    return res.text as string;
+  } catch {
+    return '';
+  }
+}
 
 /* =========================== DATA LOADER =========================== */
 
@@ -111,6 +144,8 @@ function mapUser(u: any): UserProfile {
     monthlyIncome: u.monthlyIncome || 0, savingsMode: u.savingsMode || 'Balanced',
     xp: u.xp || 0, level: u.level || 'Rookie Saver', nextLevel: u.nextLevel || 'Budget Pro',
     xpToNext: u.xpToNext || 300, badges: u.badges || [], autoSmsEnabled: !!u.autoSmsEnabled,
+    messageAccess: !!u.messageAccess, agentPersona: u.agentPersona || 'Coach',
+    roundUpEnabled: !!u.roundUpEnabled, roundUpTo: u.roundUpTo || 10, roundUpPot: u.roundUpPot || 0,
     savedByAi: u.savedByAi || 0, isDemo: !!u.isDemo,
   };
 }
@@ -218,6 +253,7 @@ interface GoalsState {
   updateGoalSaved: (id: number, amount: number) => Promise<void>;
   updateWeeklyTarget: (id: number, amount: number) => Promise<void>;
   deleteGoal: (id: number) => Promise<void>;
+  sweepRoundUp: (goalId: number) => Promise<number>;
 }
 
 export const useGoalsStore = create<GoalsState>(() => ({
@@ -244,6 +280,12 @@ export const useGoalsStore = create<GoalsState>(() => ({
   deleteGoal: async (id) => {
     await apiFetch(`/api/me/goals/${id}`, { method: 'DELETE' });
     await loadUserData();
+  },
+
+  sweepRoundUp: async (goalId) => {
+    const res = await apiFetch('/api/me/roundup/sweep', { method: 'POST', body: { goalId } });
+    await loadUserData();
+    return res.moved as number;
   },
 }));
 

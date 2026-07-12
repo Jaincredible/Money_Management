@@ -1,8 +1,14 @@
 import { useState } from 'react';
-import { LogOut, Pencil, Check, X, Trophy, MapPin, Mail, GraduationCap, Sparkles, Loader2, ShieldCheck } from 'lucide-react';
+import { LogOut, Pencil, Check, X, Trophy, MapPin, Mail, GraduationCap, Sparkles, Loader2, ShieldCheck, MessageSquare, Bot, Coins } from 'lucide-react';
 import { useUserStore, useAuthStore } from '../stores/useFinanceStore';
 import { FALLBACK_PREFS_META } from '../lib/prefs';
-import { savingsRate } from '../lib/constants';
+import { savingsRate, inr } from '../lib/constants';
+
+const PERSONA_BLURB: Record<string, string> = {
+  Coach: 'Warm, motivating and practical.',
+  Hype: 'High-energy, playful, lots of hype 🎉',
+  Chill: 'Calm, minimal, straight to the point.',
+};
 
 const MODES = ['Conservative', 'Balanced', 'Aggressive'] as const;
 
@@ -11,9 +17,11 @@ export default function Profile() {
   const { logout } = useAuthStore();
   const [editing, setEditing] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
   const [form, setForm] = useState(profile);
 
-  const startEdit = () => { setForm(profile); setEditing(true); };
+  const startEdit = () => { setForm(profile); setErr(''); setEditing(true); };
+  const toggleMessageAccess = () => updateProfile({ messageAccess: !profile.messageAccess }).catch(() => {});
   const set = (k: string, v: any) => setForm((p) => ({ ...p, [k]: v }));
   const togglePref = (key: string) =>
     set('spendingPreferences', form.spendingPreferences.includes(key)
@@ -22,14 +30,17 @@ export default function Profile() {
 
   const save = async () => {
     setBusy(true);
+    setErr('');
     try {
       await updateProfile({
-        fullName: form.fullName, address: form.address, country: form.country,
+        fullName: form.fullName, email: form.email, address: form.address, country: form.country,
         state: form.state, city: form.city, collegeName: form.collegeName,
         monthlyIncome: Number(form.monthlyIncome) || 0, savingsMode: form.savingsMode,
         spendingPreferences: form.spendingPreferences,
-      });
+      } as any);
       setEditing(false);
+    } catch (e: any) {
+      setErr(e.message || 'Could not save changes');
     } finally { setBusy(false); }
   };
 
@@ -111,6 +122,57 @@ export default function Profile() {
               </div>
             </div>
 
+            {/* Agent message access (adjustable anytime) */}
+            <div className="glass-card rounded-2xl p-4">
+              <div className="flex items-center gap-3">
+                <div className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 border ${profile.messageAccess ? 'bg-indigo-500/15 text-indigo-300 border-indigo-500/30' : 'bg-slate-800 text-slate-500 border-white/10'}`}>
+                  <MessageSquare size={16} />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-bold text-white">Agent reads your transaction SMS</p>
+                  <p className="text-[10px] text-slate-400 mt-0.5">
+                    {profile.messageAccess ? 'On — your budget auto-configures from bank/UPI messages (demo).' : 'Off — you log transactions manually.'}
+                  </p>
+                </div>
+                <button onClick={toggleMessageAccess} className={`w-11 h-6 flex items-center rounded-full p-1 transition-colors shrink-0 ${profile.messageAccess ? 'bg-indigo-500' : 'bg-slate-700'}`}>
+                  <div className={`bg-white w-4 h-4 rounded-full transition-transform ${profile.messageAccess ? 'translate-x-5' : ''}`} />
+                </button>
+              </div>
+            </div>
+
+            {/* Agent personality + round-up savings */}
+            <div className="glass-card rounded-2xl p-4 space-y-4">
+              <div>
+                <p className="text-[11px] uppercase font-bold text-slate-400 tracking-wider mb-2 flex items-center gap-1"><Bot size={12} /> Agent personality</p>
+                <div className="grid grid-cols-3 gap-2">
+                  {(['Coach', 'Hype', 'Chill'] as const).map((p) => (
+                    <button key={p} onClick={() => updateProfile({ agentPersona: p }).catch(() => {})} className={`py-2 rounded-xl border text-[11px] font-bold transition-all ${profile.agentPersona === p ? 'bg-indigo-600/20 border-indigo-500 text-white' : 'bg-slate-950 border-white/5 text-slate-400'}`}>{p}</button>
+                  ))}
+                </div>
+                <p className="text-[9px] text-slate-500 mt-1.5">{PERSONA_BLURB[profile.agentPersona]}</p>
+              </div>
+              <div className="border-t border-white/5 pt-3.5">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Coins className="text-amber-400" size={16} />
+                    <div><p className="text-xs text-white font-medium">Round-up savings</p><p className="text-[9px] text-slate-500">Stash spare change from each expense</p></div>
+                  </div>
+                  <button onClick={() => updateProfile({ roundUpEnabled: !profile.roundUpEnabled }).catch(() => {})} className={`w-11 h-6 flex items-center rounded-full p-1 transition-colors shrink-0 ${profile.roundUpEnabled ? 'bg-indigo-500' : 'bg-slate-700'}`}>
+                    <div className={`bg-white w-4 h-4 rounded-full transition-transform ${profile.roundUpEnabled ? 'translate-x-5' : ''}`} />
+                  </button>
+                </div>
+                {profile.roundUpEnabled && (
+                  <div className="flex items-center gap-2 mt-3">
+                    <span className="text-[10px] text-slate-400">Round up to</span>
+                    {[10, 50].map((s) => (
+                      <button key={s} onClick={() => updateProfile({ roundUpTo: s }).catch(() => {})} className={`px-2.5 py-1 rounded-full text-[10px] font-bold border ${profile.roundUpTo === s ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-slate-950 border-white/5 text-slate-400'}`}>₹{s}</button>
+                    ))}
+                    <span className="text-[10px] text-slate-500 ml-auto">Pot: <span className="text-amber-300 font-bold">{inr(profile.roundUpPot)}</span></span>
+                  </div>
+                )}
+              </div>
+            </div>
+
             {/* Badges */}
             {profile.badges.length > 0 && (
               <div className="glass-card rounded-2xl p-4">
@@ -145,6 +207,7 @@ export default function Profile() {
               <button onClick={() => setEditing(false)} className="p-1.5 rounded-full bg-slate-800 text-slate-400 hover:text-white"><X size={14} /></button>
             </div>
             <div className="space-y-1"><label className={label}>Full name</label><input className={input} value={form.fullName} onChange={(e) => set('fullName', e.target.value)} /></div>
+            <div className="space-y-1"><label className={label}>Email</label><input className={input} type="email" value={form.email} onChange={(e) => set('email', e.target.value)} /></div>
             <div className="space-y-1"><label className={label}>Address</label><input className={input} value={form.address} onChange={(e) => set('address', e.target.value)} /></div>
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1"><label className={label}>City</label><input className={input} value={form.city} onChange={(e) => set('city', e.target.value)} /></div>
@@ -183,6 +246,7 @@ export default function Profile() {
               </div>
             </div>
 
+            {err && <p className="text-[11px] text-rose-400 font-semibold text-center bg-rose-950/30 border border-rose-500/20 py-2 px-3 rounded-xl">{err}</p>}
             <button onClick={save} disabled={busy} className="w-full py-3 bg-indigo-gradient text-white rounded-full font-bold text-sm shadow-indigo-glow flex items-center justify-center gap-2 disabled:opacity-60">
               {busy ? <Loader2 size={16} className="animate-spin" /> : <><Check size={15} /> Save changes</>}
             </button>

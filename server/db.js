@@ -151,10 +151,26 @@ class MockCollection {
     return { insertedCount: newDocs.length };
   }
 
-  async updateOne(query, update) {
+  async updateOne(query, update, options = {}) {
     const docs = this._getDocs();
     const doc = docs.find(d => this._match(d, query));
-    if (!doc) return { matchedCount: 0, modifiedCount: 0 };
+    if (!doc) {
+      if (options.upsert) {
+        // Seed the new doc from the query's plain-equality fields, then apply the update.
+        const fresh = {};
+        for (const k in query) {
+          if (k === '$or' || k === '$and') continue;
+          if (query[k] && typeof query[k] === 'object' && !Array.isArray(query[k])) continue;
+          fresh[k] = query[k];
+        }
+        this._applyUpdate(fresh, update);
+        if (!fresh._id) fresh._id = `mock_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
+        docs.push(fresh);
+        this._saveDocs(docs);
+        return { matchedCount: 0, modifiedCount: 0, upsertedCount: 1, upsertedId: fresh._id };
+      }
+      return { matchedCount: 0, modifiedCount: 0 };
+    }
     this._applyUpdate(doc, update);
     this._saveDocs(docs);
     return { matchedCount: 1, modifiedCount: 1 };

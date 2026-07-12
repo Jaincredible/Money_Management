@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
-import { Bot, Plus, ArrowRight, X, Trash2, Loader2, Check, PiggyBank } from 'lucide-react';
-import { useGoalsStore } from '../stores/useFinanceStore';
+import { Bot, Plus, ArrowRight, X, Trash2, Loader2, Check, PiggyBank, Users } from 'lucide-react';
+import { useGoalsStore, useAgentStore } from '../stores/useFinanceStore';
+import type { Goal } from '../stores/useFinanceStore';
 import { inr } from '../lib/constants';
 
 const EMOJIS = ['🏖️', '💻', '🛡️', '✈️', '🚗', '🎓', '🎁', '🏠', '🚴', '👟', '📱', '🎧'];
@@ -17,6 +18,7 @@ function history(saved: number, id: number) {
 
 export default function Goals() {
   const { goals, addGoal, deleteGoal, updateGoalSaved } = useGoalsStore();
+  const { addActivityLog, setCurrentNotification } = useAgentStore();
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [depositId, setDepositId] = useState<number | null>(null);
@@ -27,8 +29,16 @@ export default function Goals() {
   const [targetDate, setTargetDate] = useState('');
   const [weeklyTarget, setWeeklyTarget] = useState('');
   const [monitor, setMonitor] = useState(true);
+  const [shared, setShared] = useState(false);
+  const [jarFriends, setJarFriends] = useState('');
   const [creating, setCreating] = useState(false);
   const [createStep, setCreateStep] = useState(0);
+
+  const nudge = (g: Goal) => {
+    const names = (g.members || []).map((m) => m.name).join(', ');
+    addActivityLog({ category: 'COMMUNITY', description: `Nudged ${names} to chip in to your ${g.name} jar.` });
+    setCurrentNotification({ emoji: '👋', title: 'Nudge sent', message: `Reminded ${names} to add to your ${g.name} jar.` });
+  };
 
   const calcWeekly = (tgt: number, dt: string) => {
     if (!tgt || !dt) return;
@@ -44,13 +54,16 @@ export default function Goals() {
     await new Promise((r) => setTimeout(r, 500)); setCreateStep(2);
     await new Promise((r) => setTimeout(r, 500)); setCreateStep(3);
     try {
+      const members = shared ? jarFriends.split(',').map((s) => s.trim()).filter(Boolean) : [];
       await addGoal({
         name, emoji, target: parseFloat(target),
         weeklyTarget: parseFloat(weeklyTarget) || Math.round(parseFloat(target) / 12),
         startDate: new Date().toISOString().split('T')[0], targetDate, agentMonitoring: monitor,
-      });
+        shared, members,
+      } as any);
       setIsAddOpen(false);
       setName(''); setEmoji('🏖️'); setTarget(''); setTargetDate(''); setWeeklyTarget('');
+      setShared(false); setJarFriends('');
     } finally {
       setCreating(false); setCreateStep(0);
     }
@@ -92,11 +105,18 @@ export default function Goals() {
                         <span className="text-[9px] text-slate-500 mt-1 inline-block">Target: {g.targetDate || 'no date'}</span>
                       </div>
                     </div>
-                    {g.agentMonitoring && (
-                      <span className="text-[9px] bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 px-2 py-0.5 rounded-full flex items-center gap-1 font-bold">
-                        <Bot size={10} /> Agent
-                      </span>
-                    )}
+                    <div className="flex items-center gap-1.5">
+                      {g.shared && (
+                        <span className="text-[9px] bg-violet-500/10 text-violet-300 border border-violet-500/20 px-2 py-0.5 rounded-full flex items-center gap-1 font-bold">
+                          <Users size={10} /> Jar
+                        </span>
+                      )}
+                      {g.agentMonitoring && (
+                        <span className="text-[9px] bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 px-2 py-0.5 rounded-full flex items-center gap-1 font-bold">
+                          <Bot size={10} /> Agent
+                        </span>
+                      )}
+                    </div>
                   </div>
 
                   <div className="w-full bg-slate-950 h-2 rounded-full overflow-hidden border border-white/5 mb-3">
@@ -107,6 +127,20 @@ export default function Goals() {
                     <div><span className="text-emerald-400 font-bold">{inr(g.saved)}</span><span className="text-slate-500 text-[10px] ml-1">saved</span></div>
                     <div className="text-[10px] text-slate-400">of {inr(g.target)} <span className="text-indigo-400 font-bold ml-1">({pct}%)</span></div>
                   </div>
+
+                  {/* Shared jar members */}
+                  {g.shared && g.members && g.members.length > 0 && (
+                    <div className="flex items-center gap-2 mb-3 bg-violet-500/5 border border-violet-500/15 rounded-xl p-2">
+                      <div className="flex -space-x-2">
+                        {g.members.map((m) => (
+                          <span key={m.name} title={`${m.name}: ${inr(m.contributed)}`} className="w-6 h-6 rounded-full bg-violet-600 border border-slate-900 text-white text-[8px] font-bold flex items-center justify-center">{m.name.slice(0, 2).toUpperCase()}</span>
+                        ))}
+                        <span className="w-6 h-6 rounded-full bg-emerald-600 border border-slate-900 text-white text-[7px] font-bold flex items-center justify-center">YOU</span>
+                      </div>
+                      <span className="text-[9px] text-slate-400">friends chipped in {inr(g.members.reduce((s, m) => s + m.contributed, 0))}</span>
+                      <button onClick={() => nudge(g)} className="text-[9px] text-violet-300 font-bold ml-auto hover:underline">Nudge 👋</button>
+                    </div>
+                  )}
 
                   {/* Deposit control */}
                   {depositId === g.id ? (
@@ -195,6 +229,15 @@ export default function Goals() {
                 <div className="flex items-center gap-2"><Bot className="text-indigo-400" size={16} /><div className="text-left"><p className="text-xs text-white font-medium">Agent monitoring</p><p className="text-[9px] text-slate-500">Auto-adjusts if you overspend</p></div></div>
                 <button type="button" onClick={() => setMonitor(!monitor)} className={`w-10 h-6 flex items-center rounded-full p-1 transition-colors ${monitor ? 'bg-indigo-500' : 'bg-slate-700'}`}><div className={`bg-white w-4 h-4 rounded-full transition-transform ${monitor ? 'translate-x-4' : ''}`} /></button>
               </div>
+
+              <div className="bg-slate-950/50 p-3 rounded-xl border border-white/5 space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2"><Users className="text-violet-400" size={16} /><div className="text-left"><p className="text-xs text-white font-medium">Make it a shared Jar</p><p className="text-[9px] text-slate-500">Friends can chip in too</p></div></div>
+                  <button type="button" onClick={() => setShared(!shared)} className={`w-10 h-6 flex items-center rounded-full p-1 transition-colors ${shared ? 'bg-violet-500' : 'bg-slate-700'}`}><div className={`bg-white w-4 h-4 rounded-full transition-transform ${shared ? 'translate-x-4' : ''}`} /></button>
+                </div>
+                {shared && <input value={jarFriends} onChange={(e) => setJarFriends(e.target.value)} placeholder="Invite friends: Priya, Rahul" className="w-full bg-slate-900 border border-white/10 rounded-xl py-2 px-3 text-white text-xs focus:outline-none focus:border-violet-500 animate-fade-in" />}
+              </div>
+
               <button type="submit" className="w-full py-3 bg-indigo-gradient text-white rounded-full font-semibold text-sm shadow-indigo-glow flex items-center justify-center gap-2">Create Goal <ArrowRight size={14} /></button>
             </form>
           </div>

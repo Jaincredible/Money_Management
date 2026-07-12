@@ -21,6 +21,13 @@ export const SPENDING_PREFERENCES = [
   { key: 'Transport', emoji: '🚌', label: 'Transport' }
 ];
 
+// Round an expense up to the nearest `step` and return the spare change.
+export function computeRoundUp(amount, step = 10) {
+  if (!step || step <= 0) return 0;
+  const up = Math.ceil(amount / step) * step;
+  return Math.max(0, Math.round(up - amount));
+}
+
 export function savingsRateForMode(mode) {
   switch (mode) {
     case 'Conservative': return 0.20;
@@ -28,6 +35,56 @@ export function savingsRateForMode(mode) {
     case 'Balanced':
     default: return 0.30;
   }
+}
+
+// Suggested monthly budgets per expense category (mirrors the frontend).
+export const CATEGORY_BUDGETS = {
+  Food: 2500, Groceries: 2000, Transport: 800, Travel: 3000, Studies: 1500,
+  Entertainment: 800, Sports: 1200, Shopping: 1500, Subscriptions: 600, Fitness: 1000, Other: 1000
+};
+
+const MERCHANT_HINTS = {
+  swiggy: 'Swiggy', zomato: 'Zomato', chaayos: 'Chaayos', canteen: 'Campus Canteen', mess: 'Campus Canteen',
+  blinkit: 'Blinkit', zepto: 'Zepto', bigbasket: 'BigBasket', dmart: 'DMart',
+  uber: 'Uber', ola: 'Ola', rapido: 'Rapido', metro: 'Metro',
+  irctc: 'IRCTC', makemytrip: 'MakeMyTrip', redbus: 'RedBus', ixigo: 'Ixigo', flight: 'MakeMyTrip', train: 'IRCTC',
+  amazon: 'Amazon', flipkart: 'Flipkart', myntra: 'Myntra', ajio: 'Ajio', udemy: 'Udemy', xerox: 'Xerox Point',
+  bookmyshow: 'BookMyShow', pvr: 'PVR', steam: 'Steam', netflix: 'Netflix', spotify: 'Spotify', youtube: 'YouTube', prime: 'Amazon Prime',
+  decathlon: 'Decathlon', playo: 'Playo', turf: 'Turf Arena', nike: 'Nike', cult: 'Cult.fit', gym: "Gold's Gym", healthkart: 'HealthKart'
+};
+
+// Best-effort merchant name from a free-text description (demo-grade parsing).
+export function deriveMerchant(description = '', category = '') {
+  const t = String(description).toLowerCase();
+  for (const [k, v] of Object.entries(MERCHANT_HINTS)) if (t.includes(k)) return v;
+  const w = String(description).trim().split(/\s+/)[0];
+  return w ? w[0].toUpperCase() + w.slice(1) : (category || 'Other');
+}
+
+// After an expense, alert if the category's month-to-date spend nears/exceeds budget.
+export async function checkBudgetAlert(db, userId, category) {
+  const budget = CATEGORY_BUDGETS[category];
+  if (!budget) return;
+  const now = new Date();
+  const txs = await db.collection('transactions').find({ userId, type: 'expense', category }).toArray();
+  const monthSpent = txs.filter((t) => {
+    const d = new Date(t.date);
+    return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
+  }).reduce((s, t) => s + t.amount, 0);
+  const pct = monthSpent / budget;
+  if (pct < 0.9) return;
+  const over = pct >= 1;
+  await pushNotification(db, userId, {
+    type: 'alert', emoji: '⚠️',
+    title: `${category} budget ${over ? 'exceeded' : 'alert'}`,
+    message: over
+      ? `You've gone over your ${category} budget this month (₹${monthSpent.toLocaleString('en-IN')} / ₹${budget.toLocaleString('en-IN')}). Want me to rebalance?`
+      : `You're at ${Math.round(pct * 100)}% of your ${category} budget (₹${monthSpent.toLocaleString('en-IN')} / ₹${budget.toLocaleString('en-IN')}).`
+  });
+  await logActivity(db, userId, {
+    category: 'ALERT',
+    description: `${category} spending reached ${Math.round(pct * 100)}% of its ₹${budget.toLocaleString('en-IN')} monthly budget.`
+  });
 }
 
 // Insert a human-readable activity entry (NO database commands are ever stored/shown).

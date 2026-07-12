@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Bot, ArrowRight, ArrowLeft, Loader2, Check, User, MapPin, Sparkles } from 'lucide-react';
+import { Bot, ArrowRight, ArrowLeft, Loader2, Check, User, MapPin, Sparkles, ShieldCheck } from 'lucide-react';
 import { useAuthStore } from '../stores/useFinanceStore';
 import { apiFetch } from '../lib/api';
 
@@ -39,6 +39,7 @@ export default function Signup() {
     fullName: '', address: '', country: 'India', state: '', city: '', collegeName: '',
     monthlyIncome: '', savingsMode: 'Balanced' as 'Conservative' | 'Balanced' | 'Aggressive',
     spendingPreferences: [] as string[],
+    messageAccess: true,
   });
   const set = (k: string, v: any) => setF((prev) => ({ ...prev, [k]: v }));
 
@@ -76,7 +77,7 @@ export default function Signup() {
         username: f.username, email: f.email, password: f.password, fullName: f.fullName,
         address: f.address, country: f.country, state: f.state, city: f.city, collegeName: f.collegeName,
         monthlyIncome: Number(f.monthlyIncome) || 0, savingsMode: f.savingsMode,
-        spendingPreferences: f.spendingPreferences,
+        spendingPreferences: f.spendingPreferences, messageAccess: f.messageAccess,
       });
       // authed -> App swaps to the main UI automatically
     } catch (err: any) {
@@ -223,6 +224,27 @@ export default function Signup() {
                     <span className="text-[8px] text-slate-500 mt-0.5">{m.hint}</span>
                   </button>
                 ))}
+              </div>
+            </div>
+
+            {/* Agent message-access permission (demo) */}
+            <div className="rounded-2xl border border-indigo-500/30 bg-indigo-600/10 p-4">
+              <div className="flex items-start gap-3">
+                <div className="w-9 h-9 rounded-full bg-indigo-500/20 border border-indigo-500/30 flex items-center justify-center text-indigo-300 shrink-0">
+                  <ShieldCheck size={17} />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-bold text-white flex items-center gap-1.5 flex-wrap">
+                    Let FinAgent read your transaction SMS
+                    <span className="text-[8px] bg-indigo-500/20 text-indigo-300 px-1.5 py-0.5 rounded-full uppercase font-bold tracking-wider">Recommended</span>
+                  </p>
+                  <p className="text-[10px] text-slate-400 leading-relaxed mt-1">
+                    It auto-detects what you spent & earned from bank/UPI messages, so your budget configures itself — zero manual entry. Change it anytime in Profile.
+                  </p>
+                </div>
+                <button type="button" onClick={() => set('messageAccess', !f.messageAccess)} className={`w-11 h-6 flex items-center rounded-full p-1 transition-colors shrink-0 ${f.messageAccess ? 'bg-indigo-500' : 'bg-slate-700'}`}>
+                  <div className={`bg-white w-4 h-4 rounded-full transition-transform ${f.messageAccess ? 'translate-x-5' : ''}`} />
+                </button>
               </div>
             </div>
           </div>
