@@ -33,8 +33,10 @@ export default function FriendChat({ username, onClose, onChanged }: Props) {
     ]).then(([p, m]) => {
       if (!alive) return;
       setProfile(p); setMessages(m || []); setLoading(false);
+      onChanged?.(); // opening the thread marked messages read — refresh unread badges
     });
     return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [username]);
 
   useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages, loading]);

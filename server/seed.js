@@ -162,17 +162,27 @@ function makeSocial() {
   mk('meera', 'ananya', 'accepted');
   mk('kabir', 'rohan', 'accepted');
 
+  const name = Object.fromEntries(profiles.map((p) => [p.username, p.fullName]));
   const msgs = [];
-  const mk2 = (a, b, from, text, daysAgo, hour) => msgs.push({
-    id: `fm-${msgs.length + 1}`, threadKey: [id[a], id[b]].sort().join('|'),
-    fromUserId: id[from], text, date: iso(daysAgo, hour)
-  });
-  mk2('arjun', 'priya', 'priya', 'Yo! You in for the No-Spend weekend?', 2, 10);
-  mk2('arjun', 'priya', 'arjun', 'Haha yes, saving up for Goa 🏖️', 2, 11);
-  mk2('arjun', 'priya', 'priya', "Let's hit ₹15k together 💪", 2, 11);
-  mk2('arjun', 'rahul', 'rahul', 'Bro send your DSA notes 🙏', 1, 18);
-  mk2('arjun', 'rahul', 'arjun', 'Sending now 📚', 1, 19);
-  return { reqs, msgs };
+  const msgNotifs = [];
+  const mk2 = (a, b, from, text, daysAgo, hour, read = true) => {
+    const to = from === a ? b : a;
+    msgs.push({
+      id: `fm-${msgs.length + 1}`, threadKey: [id[a], id[b]].sort().join('|'),
+      fromUserId: id[from], fromUsername: from, toUserId: id[to], text, read, date: iso(daysAgo, hour)
+    });
+    if (!read) msgNotifs.push({
+      id: `ntf-msg-${msgNotifs.length + 1}-${to}`, userId: id[to],
+      type: 'friend', emoji: '💬', title: `New message from ${name[from]}`,
+      message: text, read: false, date: iso(daysAgo, hour)
+    });
+  };
+  mk2('arjun', 'priya', 'priya', 'Yo! You in for the No-Spend weekend?', 2, 10, true);
+  mk2('arjun', 'priya', 'arjun', 'Haha yes, saving up for Goa 🏖️', 2, 11, true);
+  mk2('arjun', 'priya', 'priya', "Let's hit ₹15k together 💪", 2, 11, false);  // unread for arjun
+  mk2('arjun', 'rahul', 'arjun', 'Yo, DSA notes ready?', 1, 17, true);
+  mk2('arjun', 'rahul', 'rahul', 'Sending now 📚 lunch after?', 1, 19, false); // unread for arjun
+  return { reqs, msgs, msgNotifs };
 }
 
 export async function seedDatabase() {
@@ -234,6 +244,7 @@ export async function seedDatabase() {
   const social = makeSocial();
   await db.collection('friend_requests').insertMany(social.reqs);
   await db.collection('friend_messages').insertMany(social.msgs);
+  if (social.msgNotifs.length) await db.collection('notifications').insertMany(social.msgNotifs);
 
   console.log(`Seeded ${users.length} demo accounts + ${social.reqs.length} friendships/requests (login: any username above / password "${DEMO_PASSWORD}"). Featured demo: arjun.`);
 }

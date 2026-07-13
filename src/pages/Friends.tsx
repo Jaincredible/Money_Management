@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { UserPlus, Inbox, SendHorizonal, Search, Check, X, Loader2, Users, Trophy, MessageSquare } from 'lucide-react';
 import { apiFetch } from '../lib/api';
-import { loadUserData } from '../stores/useFinanceStore';
+import { loadUserData, useAgentStore } from '../stores/useFinanceStore';
 import FriendChat from '../components/FriendChat';
 
 interface Pub { username: string; fullName: string; level: string; xp: number; xpToNext: number; badges: string[]; collegeName: string; }
@@ -11,6 +11,7 @@ type SearchRow = Pub & { relationship: 'none' | 'friends' | 'sent' | 'incoming' 
 const initials = (name: string) => name.split(' ').map((s) => s[0]).slice(0, 2).join('').toUpperCase();
 
 export default function Friends() {
+  const { friendUnread } = useAgentStore();
   const [data, setData] = useState<FriendsData>({ friends: [], incoming: [], sent: [] });
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState<'add' | 'requests' | 'sent' | null>(null);
@@ -120,11 +121,19 @@ export default function Friends() {
           </div>
         ) : (
           <div className="space-y-2">
-            {filteredFriends.map((f) => (
-              <button key={f.username} onClick={() => setChatUser(f.username)} className="w-full text-left">
-                <PersonRow p={f} right={<span className="text-indigo-400 flex items-center gap-1 text-[10px] font-bold"><MessageSquare size={12} /> Chat</span>} />
-              </button>
-            ))}
+            {filteredFriends.map((f) => {
+              const unread = friendUnread?.byUsername?.[f.username] || 0;
+              return (
+                <button key={f.username} onClick={() => setChatUser(f.username)} className="w-full text-left">
+                  <PersonRow p={f} right={
+                    <span className="flex items-center gap-2">
+                      {unread > 0 && <span className="min-w-[18px] h-[18px] px-1 bg-rose-500 rounded-full text-[9px] font-bold text-white flex items-center justify-center">{unread > 9 ? '9+' : unread}</span>}
+                      <span className="text-indigo-400 flex items-center gap-1 text-[10px] font-bold"><MessageSquare size={12} /> Chat</span>
+                    </span>
+                  } />
+                </button>
+              );
+            })}
           </div>
         )}
       </div>
@@ -176,7 +185,7 @@ export default function Friends() {
         </Modal>
       )}
 
-      <FriendChat username={chatUser} onClose={() => setChatUser(null)} onChanged={refresh} />
+      <FriendChat username={chatUser} onClose={() => setChatUser(null)} onChanged={() => { refresh(); loadUserData(); }} />
     </div>
   );
 }

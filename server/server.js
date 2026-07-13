@@ -174,15 +174,19 @@ app.get('/api/me/data', requireAuth, async (req, res) => {
     const user = await db.collection('users').findOne({ _id: userId });
     if (!user) return res.status(404).json({ error: 'User not found' });
 
-    const [transactions, goals, chatHistory, activityLog, notifications] = await Promise.all([
+    const [transactions, goals, chatHistory, activityLog, notifications, unreadMsgs] = await Promise.all([
       db.collection('transactions').find({ userId }).toArray(),
       db.collection('goals').find({ userId }).toArray(),
       db.collection('chats').find({ userId }).toArray(),
       db.collection('activity_logs').find({ userId }).sort({ _id: -1 }).toArray(),
-      db.collection('notifications').find({ userId }).sort({ _id: -1 }).toArray()
+      db.collection('notifications').find({ userId }).sort({ _id: -1 }).toArray(),
+      db.collection('friend_messages').find({ toUserId: userId, read: false }).toArray()
     ]);
 
-    res.json({ user: sanitizeUser(user), transactions, goals, chatHistory, activityLog, notifications });
+    const friendUnread = { total: unreadMsgs.length, byUsername: {} };
+    unreadMsgs.forEach((m) => { friendUnread.byUsername[m.fromUsername] = (friendUnread.byUsername[m.fromUsername] || 0) + 1; });
+
+    res.json({ user: sanitizeUser(user), transactions, goals, chatHistory, activityLog, notifications, friendUnread });
   } catch (e) {
     console.error('Data fetch error:', e);
     res.status(500).json({ error: 'Failed to fetch your data' });
@@ -619,8 +623,11 @@ app.get('/api/me/friends/:username/messages', requireAuth, async (req, res) => {
     const other = await db.collection('users').findOne({ username: norm(req.params.username) });
     if (!other) return res.status(404).json({ error: 'User not found' });
     if (!(await areFriends(db, req.userId, other._id))) return res.status(403).json({ error: 'You can only chat with friends.' });
-    const msgs = await db.collection('friend_messages').find({ threadKey: threadKey(req.userId, other._id) }).toArray();
+    const key = threadKey(req.userId, other._id);
+    const msgs = await db.collection('friend_messages').find({ threadKey: key }).toArray();
     msgs.sort((a, b) => new Date(a.date) - new Date(b.date));
+    // Opening the thread marks the friend's messages to me as read.
+    await db.collection('friend_messages').updateMany({ threadKey: key, toUserId: req.userId, read: false }, { $set: { read: true } });
     res.json(msgs.map((m) => ({ id: m.id, fromMe: m.fromUserId === req.userId, text: m.text, date: m.date })));
   } catch (e) {
     res.status(500).json({ error: 'Failed to load messages' });
@@ -636,12 +643,21 @@ app.post('/api/me/friends/:username/messages', requireAuth, async (req, res) => 
     const other = await db.collection('users').findOne({ username: norm(req.params.username) });
     if (!other) return res.status(404).json({ error: 'User not found' });
     if (!(await areFriends(db, req.userId, other._id))) return res.status(403).json({ error: 'You can only chat with friends.' });
+    const me_ = await db.collection('users').findOne({ _id: req.userId });
     const msg = {
       id: `fm-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
       threadKey: threadKey(req.userId, other._id),
-      fromUserId: req.userId, text: text.trim(), date: new Date().toISOString(),
+      fromUserId: req.userId, fromUsername: me_.username,
+      toUserId: other._id, text: text.trim(), read: false,
+      date: new Date().toISOString(),
     };
     await db.collection('friend_messages').insertOne(msg);
+    // Drop it into the friend's notification bell too.
+    await pushNotification(db, other._id, {
+      type: 'friend', emoji: '💬',
+      title: `New message from ${me_.fullName}`,
+      message: text.trim().length > 90 ? text.trim().slice(0, 90) + '…' : text.trim(),
+    });
     res.json({ id: msg.id, fromMe: true, text: msg.text, date: msg.date });
   } catch (e) {
     res.status(500).json({ error: 'Failed to send message' });

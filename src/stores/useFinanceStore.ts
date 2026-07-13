@@ -130,6 +130,7 @@ export const loadUserData = async () => {
     chatHistory: data.chatHistory || [],
     activityLog: data.activityLog || [],
     notifications: data.notifications || [],
+    friendUnread: data.friendUnread || { total: 0, byUsername: {} },
   });
   return data;
 };
@@ -201,7 +202,7 @@ export const useAuthStore = create<AuthState>((set) => ({
     useUserStore.setState({ profile: { ...EMPTY_PROFILE } });
     useTransactionsStore.setState({ transactions: [] });
     useGoalsStore.setState({ goals: [] });
-    useAgentStore.setState({ chatHistory: [], activityLog: [], notifications: [], currentNotification: null });
+    useAgentStore.setState({ chatHistory: [], activityLog: [], notifications: [], friendUnread: { total: 0, byUsername: {} }, currentNotification: null });
     set({ status: 'guest' });
   },
 }));
@@ -298,11 +299,17 @@ interface ToastNotification {
   emoji?: string;
 }
 
+interface FriendUnread {
+  total: number;
+  byUsername: Record<string, number>;
+}
+
 interface AgentState {
   chatHistory: ChatMessage[];
   isThinking: boolean;
   activityLog: ActivityItem[];
   notifications: AppNotification[];
+  friendUnread: FriendUnread;
   currentNotification: ToastNotification | null;
   addChatMessage: (text: string) => Promise<void>;
   deleteChat: () => Promise<void>;
@@ -317,6 +324,7 @@ export const useAgentStore = create<AgentState>((set) => ({
   isThinking: false,
   activityLog: [],
   notifications: [],
+  friendUnread: { total: 0, byUsername: {} },
   currentNotification: null,
 
   addChatMessage: async (text) => {
