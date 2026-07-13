@@ -21,11 +21,13 @@ export const SPENDING_PREFERENCES = [
   { key: 'Transport', emoji: '🚌', label: 'Transport' }
 ];
 
-// Round an expense up to the nearest `step` and return the spare change.
+// Round an expense up to the NEXT `step` (₹10/₹50) and return the spare change.
+// We go to the next multiple *above* the amount, so even round amounts (e.g. ₹240)
+// still stash something (₹240 → ₹250 = ₹10). Result is always in (0, step].
 export function computeRoundUp(amount, step = 10) {
   if (!step || step <= 0) return 0;
-  const up = Math.ceil(amount / step) * step;
-  return Math.max(0, Math.round(up - amount));
+  const up = Math.floor(amount / step) * step + step;
+  return Math.round(up - amount);
 }
 
 export function savingsRateForMode(mode) {

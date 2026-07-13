@@ -13,8 +13,28 @@ const apiKey = process.env.GEMINI_API_KEY;
 if (!apiKey) {
   throw new Error('Please define the GEMINI_API_KEY environment variable in server/.env');
 }
-const MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+const PRIMARY_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+const FALLBACK_MODEL = process.env.GEMINI_FALLBACK_MODEL || 'gemini-2.0-flash';
 const genAI = new GoogleGenerativeAI(apiKey);
+
+// Generate content, trying the primary model first and the fallback model on failure.
+async function genContent({ systemInstruction, tools, contents }) {
+  const req = { contents };
+  if (tools) req.tools = tools;
+  let lastErr;
+  for (const modelName of [PRIMARY_MODEL, FALLBACK_MODEL]) {
+    try {
+      const model = genAI.getGenerativeModel(
+        systemInstruction ? { model: modelName, systemInstruction } : { model: modelName }
+      );
+      return await model.generateContent(req);
+    } catch (e) {
+      lastErr = e;
+      console.warn(`[Gemini] ${modelName} failed: ${(e.message || '').split('\n')[0]}`);
+    }
+  }
+  throw lastErr;
+}
 
 const ALL_CATEGORIES = [...new Set([...EXPENSE_CATEGORIES, ...INCOME_CATEGORIES])];
 
@@ -375,10 +395,8 @@ export async function runAgentChat(userId, userMessage) {
   history.reverse();
 
   const contextPack = await buildContextPack(db, user);
-  const model = genAI.getGenerativeModel({
-    model: MODEL,
-    systemInstruction: `${systemInstruction}\n${personaTone(user.agentPersona)}\n${contextPack}`
-  });
+  const sysInstruction = `${systemInstruction}\n${personaTone(user.agentPersona)}\n${contextPack}`;
+  const tools = [{ functionDeclarations }];
 
   const contents = history.map(m => ({
     role: m.sender === 'user' ? 'user' : 'model',
@@ -389,7 +407,7 @@ export async function runAgentChat(userId, userMessage) {
   const reasoningSteps = [];
   const actionsTaken = [];
 
-  let result = await model.generateContent({ contents, tools: [{ functionDeclarations }] });
+  let result = await genContent({ systemInstruction: sysInstruction, tools, contents });
   let response = result.response;
   let calls = (typeof response.functionCalls === 'function' ? response.functionCalls() : null) || [];
 
@@ -403,7 +421,7 @@ export async function runAgentChat(userId, userMessage) {
       toolParts.push({ functionResponse: { name: call.name, response: { result: r } } });
     }
     contents.push({ role: 'user', parts: toolParts });
-    result = await model.generateContent({ contents, tools: [{ functionDeclarations }] });
+    result = await genContent({ systemInstruction: sysInstruction, tools, contents });
     response = result.response;
     calls = (typeof response.functionCalls === 'function' ? response.functionCalls() : null) || [];
   }
@@ -466,8 +484,7 @@ ${focus}
 Goals: ${goals.map((g) => `${g.name} ₹${g.saved}/₹${g.target}`).join('; ') || 'none'}.`;
 
   try {
-    const model = genAI.getGenerativeModel({ model: MODEL });
-    const result = await model.generateContent({ contents: [{ role: 'user', parts: [{ text: prompt }] }] });
+    const result = await genContent({ contents: [{ role: 'user', parts: [{ text: prompt }] }] });
     const text = result.response.text();
     if (text && text.trim()) return text.trim();
   } catch (e) {
@@ -486,10 +503,11 @@ ${currentSummary ? `\n--- PREVIOUS SUMMARY ---\n${currentSummary}\n` : ''}
 --- CONVERSATION ---
 ${formatted}`;
 
-  const model = genAI.getGenerativeModel({ model: MODEL });
-  const result = await model.generateContent({ contents: [{ role: 'user', parts: [{ text: prompt }] }] });
   let newSummary = '';
-  try { newSummary = result.response.text(); } catch { newSummary = currentSummary || ''; }
+  try {
+    const result = await genContent({ contents: [{ role: 'user', parts: [{ text: prompt }] }] });
+    newSummary = result.response.text();
+  } catch { newSummary = currentSummary || ''; }
 
   await db.collection('users').updateOne({ _id: userId }, { $set: { chatSummary: newSummary } });
 
