@@ -12,6 +12,7 @@ import {
   EXPENSE_CATEGORIES, INCOME_CATEGORIES, SPENDING_PREFERENCES,
   deriveMerchant, checkBudgetAlert, CATEGORY_BUDGETS, computeRoundUp
 } from './heuristics.js';
+import { publicProfile, threadKey, areFriends } from './friends.js';
 
 dotenv.config();
 
@@ -450,6 +451,200 @@ app.get('/api/me/suggestion/:context', requireAuth, async (req, res) => {
   } catch (e) {
     console.error('Suggestion error:', e);
     res.status(500).json({ error: 'Failed to generate suggestion' });
+  }
+});
+
+/* ============================ FRIENDS / SOCIAL ============================ */
+
+// Search users by username or name (public info only).
+app.get('/api/users/search', requireAuth, async (req, res) => {
+  try {
+    const db = getDb();
+    const q = norm(req.query.q);
+    if (!q) return res.json([]);
+    const [users, reqs] = await Promise.all([
+      db.collection('users').find({}).toArray(),
+      db.collection('friend_requests').find({}).toArray(),
+    ]);
+    const me = req.userId;
+    const relationship = (uid) => {
+      if (uid === me) return 'self';
+      const r = reqs.find((x) => (x.fromUserId === me && x.toUserId === uid) || (x.fromUserId === uid && x.toUserId === me));
+      if (!r) return 'none';
+      if (r.status === 'accepted') return 'friends';
+      return r.fromUserId === me ? 'sent' : 'incoming';
+    };
+    const results = users
+      .filter((u) => u._id !== me && (String(u.username).includes(q) || String(u.fullName || '').toLowerCase().includes(q)))
+      .slice(0, 12)
+      .map((u) => ({ ...publicProfile(u), relationship: relationship(u._id) }));
+    res.json(results);
+  } catch (e) {
+    console.error('Search error:', e);
+    res.status(500).json({ error: 'Search failed' });
+  }
+});
+
+// A user's public profile (safe fields only).
+app.get('/api/users/:username/public', requireAuth, async (req, res) => {
+  try {
+    const db = getDb();
+    const u = await db.collection('users').findOne({ username: norm(req.params.username) });
+    if (!u) return res.status(404).json({ error: 'User not found' });
+    res.json(publicProfile(u));
+  } catch (e) {
+    res.status(500).json({ error: 'Failed to load profile' });
+  }
+});
+
+// My friends + incoming/sent pending requests.
+app.get('/api/me/friends', requireAuth, async (req, res) => {
+  try {
+    const db = getDb();
+    const me = req.userId;
+    const reqs = await db.collection('friend_requests')
+      .find({ $or: [{ fromUserId: me }, { toUserId: me }] }).toArray();
+    const otherIds = [...new Set(reqs.map((r) => (r.fromUserId === me ? r.toUserId : r.fromUserId)))];
+    const users = await db.collection('users').find({ _id: { $in: otherIds } }).toArray();
+    const byId = Object.fromEntries(users.map((u) => [u._id, publicProfile(u)]));
+
+    const friends = [], incoming = [], sent = [];
+    for (const r of reqs) {
+      const otherId = r.fromUserId === me ? r.toUserId : r.fromUserId;
+      const prof = byId[otherId];
+      if (!prof) continue;
+      if (r.status === 'accepted') friends.push(prof);
+      else if (r.toUserId === me) incoming.push({ requestId: r.id, from: prof });
+      else sent.push({ requestId: r.id, to: prof });
+    }
+    res.json({ friends, incoming, sent });
+  } catch (e) {
+    console.error('Friends list error:', e);
+    res.status(500).json({ error: 'Failed to load friends' });
+  }
+});
+
+// Send a friend request.
+app.post('/api/me/friends/request', requireAuth, async (req, res) => {
+  try {
+    const db = getDb();
+    const me = req.userId;
+    const target = await db.collection('users').findOne({ username: norm(req.body.toUsername) });
+    if (!target) return res.status(404).json({ error: 'No user with that username.' });
+    if (target._id === me) return res.status(400).json({ error: "You can't friend yourself." });
+    const existing = await db.collection('friend_requests').findOne({
+      $or: [
+        { fromUserId: me, toUserId: target._id },
+        { fromUserId: target._id, toUserId: me },
+      ],
+    });
+    if (existing) return res.status(409).json({ error: existing.status === 'accepted' ? 'Already friends.' : 'A request already exists.' });
+
+    const me_ = await db.collection('users').findOne({ _id: me });
+    await db.collection('friend_requests').insertOne({
+      id: `fr-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      fromUserId: me, fromUsername: me_.username,
+      toUserId: target._id, toUsername: target.username,
+      status: 'pending', date: new Date().toISOString(),
+    });
+    await pushNotification(db, target._id, {
+      type: 'friend', emoji: '👤', title: 'New friend request',
+      message: `${me_.fullName} (@${me_.username}) wants to connect.`,
+    });
+    res.json({ success: true });
+  } catch (e) {
+    console.error('Friend request error:', e);
+    res.status(500).json({ error: 'Failed to send request' });
+  }
+});
+
+// Accept or decline an incoming request.
+app.post('/api/me/friends/respond', requireAuth, async (req, res) => {
+  try {
+    const db = getDb();
+    const me = req.userId;
+    const { requestId, action } = req.body;
+    const r = await db.collection('friend_requests').findOne({ id: requestId, toUserId: me, status: 'pending' });
+    if (!r) return res.status(404).json({ error: 'Request not found.' });
+    if (action === 'accept') {
+      await db.collection('friend_requests').updateOne({ id: requestId }, { $set: { status: 'accepted' } });
+      const me_ = await db.collection('users').findOne({ _id: me });
+      await pushNotification(db, r.fromUserId, {
+        type: 'friend', emoji: '🤝', title: 'Friend request accepted',
+        message: `${me_.fullName} (@${me_.username}) accepted your request. Say hi!`,
+      });
+    } else {
+      await db.collection('friend_requests').deleteOne({ id: requestId });
+    }
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: 'Failed to respond' });
+  }
+});
+
+// Cancel a request I sent.
+app.post('/api/me/friends/cancel', requireAuth, async (req, res) => {
+  try {
+    const db = getDb();
+    await db.collection('friend_requests').deleteOne({ id: req.body.requestId, fromUserId: req.userId, status: 'pending' });
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: 'Failed to cancel' });
+  }
+});
+
+// Remove a friend.
+app.delete('/api/me/friends/:username', requireAuth, async (req, res) => {
+  try {
+    const db = getDb();
+    const other = await db.collection('users').findOne({ username: norm(req.params.username) });
+    if (!other) return res.status(404).json({ error: 'User not found' });
+    await db.collection('friend_requests').deleteMany({
+      status: 'accepted',
+      $or: [
+        { fromUserId: req.userId, toUserId: other._id },
+        { fromUserId: other._id, toUserId: req.userId },
+      ],
+    });
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: 'Failed to remove friend' });
+  }
+});
+
+// Get the chat thread with a friend.
+app.get('/api/me/friends/:username/messages', requireAuth, async (req, res) => {
+  try {
+    const db = getDb();
+    const other = await db.collection('users').findOne({ username: norm(req.params.username) });
+    if (!other) return res.status(404).json({ error: 'User not found' });
+    if (!(await areFriends(db, req.userId, other._id))) return res.status(403).json({ error: 'You can only chat with friends.' });
+    const msgs = await db.collection('friend_messages').find({ threadKey: threadKey(req.userId, other._id) }).toArray();
+    msgs.sort((a, b) => new Date(a.date) - new Date(b.date));
+    res.json(msgs.map((m) => ({ id: m.id, fromMe: m.fromUserId === req.userId, text: m.text, date: m.date })));
+  } catch (e) {
+    res.status(500).json({ error: 'Failed to load messages' });
+  }
+});
+
+// Send a chat message to a friend.
+app.post('/api/me/friends/:username/messages', requireAuth, async (req, res) => {
+  try {
+    const db = getDb();
+    const { text } = req.body;
+    if (!text || !text.trim()) return res.status(400).json({ error: 'Message is empty.' });
+    const other = await db.collection('users').findOne({ username: norm(req.params.username) });
+    if (!other) return res.status(404).json({ error: 'User not found' });
+    if (!(await areFriends(db, req.userId, other._id))) return res.status(403).json({ error: 'You can only chat with friends.' });
+    const msg = {
+      id: `fm-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      threadKey: threadKey(req.userId, other._id),
+      fromUserId: req.userId, text: text.trim(), date: new Date().toISOString(),
+    };
+    await db.collection('friend_messages').insertOne(msg);
+    res.json({ id: msg.id, fromMe: true, text: msg.text, date: msg.date });
+  } catch (e) {
+    res.status(500).json({ error: 'Failed to send message' });
   }
 });
 

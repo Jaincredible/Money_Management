@@ -142,12 +142,45 @@ function makeActivity(userId) {
   ];
 }
 
+// Friend graph + chat threads among the demo accounts (arjun is richly connected).
+function makeSocial() {
+  const id = Object.fromEntries(profiles.map((p) => [p.username, p._id]));
+  const reqs = [];
+  const mk = (from, to, status) => reqs.push({
+    id: `fr-${from}-${to}`, fromUserId: id[from], fromUsername: from,
+    toUserId: id[to], toUsername: to, status, date: iso(rand(1, 40))
+  });
+  mk('priya', 'arjun', 'accepted');
+  mk('arjun', 'rahul', 'accepted');
+  mk('meera', 'arjun', 'accepted');
+  mk('aisha', 'arjun', 'pending');   // incoming to arjun
+  mk('dev', 'arjun', 'pending');     // incoming to arjun
+  mk('arjun', 'kabir', 'pending');   // sent by arjun
+  mk('arjun', 'zara', 'pending');    // sent by arjun
+  mk('priya', 'zara', 'accepted');
+  mk('rahul', 'kabir', 'accepted');
+  mk('meera', 'ananya', 'accepted');
+  mk('kabir', 'rohan', 'accepted');
+
+  const msgs = [];
+  const mk2 = (a, b, from, text, daysAgo, hour) => msgs.push({
+    id: `fm-${msgs.length + 1}`, threadKey: [id[a], id[b]].sort().join('|'),
+    fromUserId: id[from], text, date: iso(daysAgo, hour)
+  });
+  mk2('arjun', 'priya', 'priya', 'Yo! You in for the No-Spend weekend?', 2, 10);
+  mk2('arjun', 'priya', 'arjun', 'Haha yes, saving up for Goa 🏖️', 2, 11);
+  mk2('arjun', 'priya', 'priya', "Let's hit ₹15k together 💪", 2, 11);
+  mk2('arjun', 'rahul', 'rahul', 'Bro send your DSA notes 🙏', 1, 18);
+  mk2('arjun', 'rahul', 'arjun', 'Sending now 📚', 1, 19);
+  return { reqs, msgs };
+}
+
 export async function seedDatabase() {
   const db = await connectDb();
   const passwordHash = await hashPassword(DEMO_PASSWORD);
 
   console.log('Clearing existing collections...');
-  for (const c of ['users', 'transactions', 'goals', 'chats', 'activity_logs', 'notifications', 'suggestions']) {
+  for (const c of ['users', 'transactions', 'goals', 'chats', 'activity_logs', 'notifications', 'suggestions', 'friend_requests', 'friend_messages']) {
     await db.collection(c).deleteMany({});
   }
 
@@ -198,7 +231,11 @@ export async function seedDatabase() {
   await db.collection('activity_logs').insertMany(allActs);
   await db.collection('notifications').insertMany(allNotifs);
 
-  console.log(`Seeded ${users.length} demo accounts (login: any username above / password "${DEMO_PASSWORD}"). Featured demo: arjun.`);
+  const social = makeSocial();
+  await db.collection('friend_requests').insertMany(social.reqs);
+  await db.collection('friend_messages').insertMany(social.msgs);
+
+  console.log(`Seeded ${users.length} demo accounts + ${social.reqs.length} friendships/requests (login: any username above / password "${DEMO_PASSWORD}"). Featured demo: arjun.`);
 }
 
 // Run directly: `node seed.js` (cross-platform entry check)

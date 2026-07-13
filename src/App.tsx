@@ -5,6 +5,7 @@ import AgentChat from './pages/AgentChat';
 import Insights from './pages/Insights';
 import Goals from './pages/Goals';
 import Community from './pages/Community';
+import Friends from './pages/Friends';
 import Profile from './pages/Profile';
 import Login from './pages/Login';
 import Signup from './pages/Signup';
@@ -118,6 +119,7 @@ function AuthedApp() {
           <Route path="/insights" element={<Insights />} />
           <Route path="/goals" element={<Goals />} />
           <Route path="/community" element={<Community />} />
+          <Route path="/friends" element={<Friends />} />
           <Route path="/profile" element={<Profile />} />
           <Route path="/admin" element={<Admin />} />
           <Route path="*" element={<Navigate to="/" replace />} />
