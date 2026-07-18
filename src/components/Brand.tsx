@@ -14,3 +14,9 @@ export function Wordmark({ className = '' }: { className?: string }) {
 export function BrandLogo({ className = '' }: { className?: string }) {
   return <img src="/pocketglow-logo.jpg" alt="PocketGlow — Smart Spending. Better Tomorrow." className={className} draggable={false} />;
 }
+
+// The circular wallet emblem — cropped from the logo. object-cover in a round
+// container hides the black corners so it reads as an intentional logomark.
+export function BrandMark({ className = '' }: { className?: string }) {
+  return <img src="/pocketglow-mark.png" alt="PocketGlow" className={`object-cover ${className}`} draggable={false} />;
+}

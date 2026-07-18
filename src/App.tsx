@@ -14,8 +14,8 @@ import BottomNav from './components/BottomNav';
 import NotificationCenter from './components/NotificationCenter';
 import { useAuthStore, useAgentStore, useUserStore } from './stores/useFinanceStore';
 import { UNAUTHORIZED_EVENT } from './lib/api';
-import { Bell, X, Sparkles, Wallet } from 'lucide-react';
-import { Wordmark, BrandLogo } from './components/Brand';
+import { Bell, X, Sparkles } from 'lucide-react';
+import { Wordmark, BrandLogo, BrandMark } from './components/Brand';
 
 function TopBar({ onBell }: { onBell: () => void }) {
   const navigate = useNavigate();
@@ -28,9 +28,7 @@ function TopBar({ onBell }: { onBell: () => void }) {
     <header className="shrink-0 w-full bg-slate-950/80 backdrop-blur-md border-b border-white/5 z-40">
       <div className="max-w-lg mx-auto px-4 h-14 flex items-center justify-between">
         <button onClick={() => navigate('/')} className="flex items-center gap-2">
-          <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-lime-400 to-green-600 flex items-center justify-center shadow-md shadow-green-500/30">
-            <Wallet size={17} className="text-slate-950" strokeWidth={2.4} />
-          </div>
+          <BrandMark className="w-9 h-9 rounded-full ring-1 ring-green-500/30 shadow-md shadow-green-500/20" />
           <div className="text-left leading-none">
             <Wordmark className="text-sm" />
             <p className="text-[9px] text-slate-400 font-medium mt-0.5">Smart spending. Better tomorrow.</p>
