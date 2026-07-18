@@ -1,7 +1,7 @@
 {
   "name": "money-management-backend",
   "version": "1.0.0",
-  "description": "Express backend for FinAgent Money Management",
+  "description": "Express backend for PocketGlow Money Management",
   "main": "server.js",
   "type": "module",
   "scripts": {

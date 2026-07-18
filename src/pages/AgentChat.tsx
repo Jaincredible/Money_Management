@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { Send, Bot, Trash2, ChevronDown, ChevronUp, X } from 'lucide-react';
 import { useAgentStore } from '../stores/useFinanceStore';
+import { Wordmark } from '../components/Brand';
 
 export default function AgentChat() {
   const { chatHistory, isThinking, addChatMessage, deleteChat } = useAgentStore();
@@ -39,7 +40,7 @@ export default function AgentChat() {
           </div>
           <div>
             <div className="flex items-center gap-1.5">
-              <h1 className="text-sm font-bold text-white leading-none">FinAgent</h1>
+              <Wordmark className="text-sm leading-none" />
               <span className="text-[9px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-1.5 py-0.5 rounded-full font-medium">Online</span>
             </div>
             <p className="text-[10px] text-slate-400 mt-0.5">Your money co-pilot · knows your full context</p>

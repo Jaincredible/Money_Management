@@ -1,4 +1,4 @@
-# FinAgent — AI Student Money Co-Pilot
+# PocketGlow — Smart Spending, Better Tomorrow
 
 A prototype personal-finance app for students, driven by a Gemini AI agent that can log
 spending, manage savings goals, and answer questions in natural language — with full JWT

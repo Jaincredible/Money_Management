@@ -215,7 +215,7 @@ export function generateSuggestions(user, txs, goals) {
   }
 
   const rate = Math.round(savingsRateForMode(user.savingsMode) * 100);
-  suggestions.push(`You're saving ${rate}% of income on a ${user.savingsMode} plan — ahead of most students on FinAgent.`);
+  suggestions.push(`You're saving ${rate}% of income on a ${user.savingsMode} plan — ahead of most students on PocketGlow.`);
 
   return suggestions.slice(0, 4);
 }

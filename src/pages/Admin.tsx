@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { AreaChart, Area, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line, ReferenceLine } from 'recharts';
 import { Lock, Unlock, LogOut, Radio, HelpCircle, ShieldAlert, CheckCircle } from 'lucide-react';
+import { Wordmark } from '../components/Brand';
 
 export default function Admin() {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(
@@ -95,7 +96,7 @@ export default function Admin() {
           </div>
 
           <div className="space-y-1.5">
-            <h1 className="text-lg font-bold text-white leading-none">FinAgent Admin Portal</h1>
+            <h1 className="text-lg font-bold text-white leading-none"><Wordmark /> Admin Portal</h1>
             <p className="text-[11px] text-slate-500">Access requires platform administrator authorization</p>
           </div>
 
@@ -212,7 +213,7 @@ export default function Admin() {
       <div className="w-full bg-slate-900 border-b border-white/5 px-6 py-4 flex flex-col md:flex-row gap-4 items-center justify-between sticky top-0 z-30 shadow-md">
         <div className="flex items-center gap-2">
           <Lock className="text-indigo-400" size={18} />
-          <span className="font-extrabold text-white tracking-wide text-base">FinAgent Admin</span>
+          <span className="text-base"><Wordmark /> <span className="font-extrabold text-white tracking-wide">Admin</span></span>
           <span className="text-[10px] bg-slate-800 text-indigo-400 font-bold border border-indigo-500/20 px-2 py-0.5 rounded-full uppercase flex items-center gap-1">
             <Radio size={10} className="animate-pulse text-red-500" />
             Live
@@ -266,7 +267,7 @@ export default function Admin() {
               <span>🔒 GDPR-safe · Zero PII</span>
               <HelpCircle size={12} />
               <span className="admin-tooltiptext leading-relaxed">
-                FinAgent is built privacy-first. Personal financial data belongs to users only — admins see aggregated trends, never individual records.
+                PocketGlow is built privacy-first. Personal financial data belongs to users only — admins see aggregated trends, never individual records.
               </span>
             </div>
           </div>
@@ -760,7 +761,7 @@ export default function Admin() {
             <div className="bg-slate-900 border border-white/5 rounded-2xl p-4 flex items-start gap-3">
               <ShieldAlert className="text-indigo-400 shrink-0 mt-0.5" size={16} />
               <p className="text-[10px] text-slate-500 italic leading-relaxed text-left">
-                FinAgent Admin Portal collects zero personally identifiable information. All user metrics are aggregated server-side before reaching this dashboard. Transaction amounts, user names, and financial data are never exposed to admin views. User IDs in activity logs are one-way hashed (SHA-256) and cannot be reversed. Compliant with DPDP Act 2023 (India).
+                PocketGlow Admin Portal collects zero personally identifiable information. All user metrics are aggregated server-side before reaching this dashboard. Transaction amounts, user names, and financial data are never exposed to admin views. User IDs in activity logs are one-way hashed (SHA-256) and cannot be reversed. Compliant with DPDP Act 2023 (India).
               </p>
             </div>
 

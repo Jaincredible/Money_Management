@@ -94,7 +94,7 @@ export default function AddTransactionModal({ isOpen, onClose, initialType = 'ex
             <div className="w-14 h-14 rounded-2xl bg-indigo-500/10 flex items-center justify-center mb-6 border border-indigo-500/20">
               <Sparkles className="text-indigo-400 animate-pulse" size={24} />
             </div>
-            <h3 className="text-base font-bold text-white mb-4">FinAgent is on it</h3>
+            <h3 className="text-base font-bold text-white mb-4">PocketGlow is on it</h3>
             <div className="w-full max-w-xs space-y-3 text-xs">
               {[
                 { n: 1, on: 'Understanding your entry…', done: 'Understood your entry' },

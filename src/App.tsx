@@ -14,7 +14,8 @@ import BottomNav from './components/BottomNav';
 import NotificationCenter from './components/NotificationCenter';
 import { useAuthStore, useAgentStore, useUserStore } from './stores/useFinanceStore';
 import { UNAUTHORIZED_EVENT } from './lib/api';
-import { Bot, Bell, X, Sparkles } from 'lucide-react';
+import { Bell, X, Sparkles, Wallet } from 'lucide-react';
+import { Wordmark, BrandLogo } from './components/Brand';
 
 function TopBar({ onBell }: { onBell: () => void }) {
   const navigate = useNavigate();
@@ -27,12 +28,12 @@ function TopBar({ onBell }: { onBell: () => void }) {
     <header className="shrink-0 w-full bg-slate-950/80 backdrop-blur-md border-b border-white/5 z-40">
       <div className="max-w-lg mx-auto px-4 h-14 flex items-center justify-between">
         <button onClick={() => navigate('/')} className="flex items-center gap-2">
-          <div className="w-8 h-8 rounded-xl bg-indigo-gradient flex items-center justify-center shadow-indigo-glow/30 shadow-md">
-            <Bot size={18} className="text-white" />
+          <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-lime-400 to-green-600 flex items-center justify-center shadow-md shadow-green-500/30">
+            <Wallet size={17} className="text-slate-950" strokeWidth={2.4} />
           </div>
           <div className="text-left leading-none">
-            <p className="text-sm font-extrabold text-white tracking-tight">FinAgent</p>
-            <p className="text-[9px] text-slate-400 font-medium">AI money co-pilot</p>
+            <Wordmark className="text-sm" />
+            <p className="text-[9px] text-slate-400 font-medium mt-0.5">Smart spending. Better tomorrow.</p>
           </div>
         </button>
 
@@ -144,11 +145,9 @@ function GuestApp() {
 
 function Splash() {
   return (
-    <div className="h-[100dvh] flex flex-col items-center justify-center bg-background gap-4">
-      <div className="w-16 h-16 rounded-3xl bg-indigo-gradient flex items-center justify-center shadow-indigo-glow animate-pulse">
-        <Bot size={32} className="text-white" />
-      </div>
-      <p className="text-xs text-slate-400 font-mono animate-pulse">Loading FinAgent…</p>
+    <div className="h-[100dvh] flex flex-col items-center justify-center bg-black gap-3">
+      <BrandLogo className="w-64 max-w-[75vw] h-auto animate-pulse" />
+      <p className="text-xs text-slate-500 font-mono animate-pulse">Loading…</p>
     </div>
   );
 }

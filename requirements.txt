@@ -1,4 +1,4 @@
-# FinAgent Money Management - Project Requirements
+# PocketGlow Money Management - Project Requirements
 
 ## Runtime Environment
 - Node.js >= 18.0.0 (Recommended: v20.x or newer)

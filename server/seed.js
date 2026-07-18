@@ -203,7 +203,7 @@ export async function seedDatabase() {
     users.push({
       _id: p._id,
       username: p.username,
-      email: `${p.username}@finagent.demo`,
+      email: `${p.username}@pocketglow.demo`,
       passwordHash,
       fullName: p.fullName,
       address: `${rand(1, 300)}, Student Housing`,

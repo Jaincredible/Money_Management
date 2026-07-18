@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Bot, ArrowRight, Sparkles, Loader2, ChevronDown, GraduationCap } from 'lucide-react';
+import { ArrowRight, Sparkles, Loader2, ChevronDown, GraduationCap } from 'lucide-react';
+import { BrandLogo } from '../components/Brand';
 import { useAuthStore } from '../stores/useFinanceStore';
 import { apiFetch } from '../lib/api';
 
@@ -56,9 +57,7 @@ export default function Login() {
       <div className="w-full max-w-sm space-y-6 relative animate-fade-in">
         {/* Brand */}
         <div className="text-center space-y-3">
-          <div className="w-16 h-16 rounded-3xl bg-indigo-gradient flex items-center justify-center mx-auto shadow-indigo-glow">
-            <Bot size={32} className="text-white" />
-          </div>
+          <BrandLogo className="w-64 max-w-full h-auto mx-auto -my-4" />
           <div>
             <h1 className="text-2xl font-extrabold text-white tracking-tight">Welcome back</h1>
             <p className="text-sm text-slate-400 mt-1">Sign in to your AI money co-pilot</p>

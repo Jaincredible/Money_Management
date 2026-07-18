@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Bot, ArrowRight, ArrowLeft, Loader2, Check, User, MapPin, Sparkles, ShieldCheck } from 'lucide-react';
+import { ArrowRight, ArrowLeft, Loader2, Check, User, MapPin, Sparkles, ShieldCheck } from 'lucide-react';
+import { BrandLogo } from '../components/Brand';
 import { useAuthStore } from '../stores/useFinanceStore';
 import { apiFetch } from '../lib/api';
 
@@ -96,9 +97,7 @@ export default function Signup() {
       <div className="w-full max-w-sm space-y-6 relative animate-fade-in">
         {/* Header + progress */}
         <div className="text-center space-y-3 pt-2">
-          <div className="w-14 h-14 rounded-2xl bg-indigo-gradient flex items-center justify-center mx-auto shadow-indigo-glow">
-            <Bot size={26} className="text-white" />
-          </div>
+          <BrandLogo className="w-56 max-w-full h-auto mx-auto -my-3" />
           <h1 className="text-xl font-extrabold text-white tracking-tight">Create your account</h1>
           <div className="flex items-center gap-1.5 justify-center">
             {[1, 2, 3].map((s) => (
@@ -200,7 +199,7 @@ export default function Signup() {
                 })}
               </div>
               <p className="text-[10px] text-slate-500 leading-relaxed">
-                FinAgent tunes its budgeting & savings suggestions around what you actually care about.
+                PocketGlow tunes its budgeting & savings suggestions around what you actually care about.
               </p>
             </div>
 
@@ -235,7 +234,7 @@ export default function Signup() {
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="text-xs font-bold text-white flex items-center gap-1.5 flex-wrap">
-                    Let FinAgent read your transaction SMS
+                    Let PocketGlow read your transaction SMS
                     <span className="text-[8px] bg-indigo-500/20 text-indigo-300 px-1.5 py-0.5 rounded-full uppercase font-bold tracking-wider">Recommended</span>
                   </p>
                   <p className="text-[10px] text-slate-400 leading-relaxed mt-1">

@@ -91,7 +91,7 @@ app.post('/api/auth/signup', async (req, res) => {
     await pushNotification(db, _id, {
       type: 'system', emoji: '👋',
       title: `Welcome, ${fullName.split(' ')[0]}!`,
-      message: `I'm FinAgent. Add your first expense or tell me what you spent, and I'll keep your budget and goals on track.`
+      message: `I'm PocketGlow. Add your first expense or tell me what you spent, and I'll keep your budget and goals on track.`
     });
 
     res.json({ token: signToken(_id), user: sanitizeUser(user) });
@@ -664,4 +664,4 @@ app.post('/api/me/friends/:username/messages', requireAuth, async (req, res) => 
   }
 });
 
-app.listen(PORT, () => console.log(`FinAgent backend running on http://localhost:${PORT}`));
+app.listen(PORT, () => console.log(`PocketGlow backend running on http://localhost:${PORT}`));

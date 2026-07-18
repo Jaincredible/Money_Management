@@ -140,7 +140,7 @@ const functionDeclarations = [
   }
 ];
 
-const systemInstruction = `You are FinAgent, a warm, sharp AI money co-pilot for a college student. You speak in short, friendly, encouraging messages. Amounts are in Indian Rupees (₹).
+const systemInstruction = `You are PocketGlow, a warm, sharp AI money co-pilot for a college student. You speak in short, friendly, encouraging messages. Amounts are in Indian Rupees (₹).
 
 CRITICAL SAFETY GUARDRAILS (never break these):
 1. You can ONLY act through the provided tools. You have NO ability to run raw database queries.
@@ -477,7 +477,7 @@ export async function generateSuggestionText(userId, context = 'home') {
     ? `Focus ONLY on the "${context}" category this month: ₹${catTxs.reduce((s, t) => s + t.amount, 0)} across ${catTxs.length} orders. By merchant: ${Object.entries(byMerchant).map(([m, v]) => `${m} ₹${v}`).join(', ') || 'none'}.`
     : `Overall picture. This month by category: ${Object.entries(byCat).map(([c, v]) => `${c} ₹${v}`).join(', ') || 'nothing yet'}.`;
 
-  const prompt = `You are FinAgent, a friendly student money coach. Give ONE short, specific, actionable suggestion (max 32 words, no preamble, no markdown). Use the numbers. Be encouraging.
+  const prompt = `You are PocketGlow, a friendly student money coach. Give ONE short, specific, actionable suggestion (max 32 words, no preamble, no markdown). Use the numbers. Be encouraging.
 User: ${user.fullName || user.username}, ${user.savingsMode} saver (${Math.round(savingsRateForMode(user.savingsMode) * 100)}% target). Likes: ${(user.spendingPreferences || []).join(', ') || 'n/a'}.
 Monthly income ~₹${user.monthlyIncome}. All-time balance ₹${income - spent}.
 ${focus}
